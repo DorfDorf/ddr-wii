@@ -1,0 +1,23 @@
+# Third-party reference material (StepMania-Wii, Dance Clone archives + extracted copies).
+# Kept local only: mixed licences, bundled copyrighted music/data. See docs/07 and docs/sources.md.
+reference/
+build-experiments/
+
+# Build outputs
+build/
+output/
+*.dol
+*.elf
+*.map
+*.o
+*.d
+*.lst
+
+# Local SD staging / songs (copyrighted music)
+sd/ddrwii/songs/
+sd/apps/*/boot.dol
+
+# Editor / OS
+.vscode/ipch/
+Thumbs.db
+.DS_Store
