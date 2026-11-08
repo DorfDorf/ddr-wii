@@ -24,6 +24,7 @@ namespace {
 // title-safe where it can be, doc 06 §11.3). Positions follow Simply Love's 4:3 screen.
 constexpr float kLeftX = 48, kLeftW = 264;            // banner, info, grid, P1 pane
 constexpr float kBannerY = 52, kBannerH = 103;        // Simply Love's 418x164 banner shape
+constexpr u64 kMediaRestUs = 200000;                   // cursor rest before banner + preview
 constexpr float kInfoY = 160, kInfoH = 52;
 constexpr float kGridY = 218, kGridRowH = 22;
 constexpr int kGridRows = 5;
@@ -279,10 +280,34 @@ bool SongSelect::frame() {
     frames_++;
     if (frames_ == 300) session_.message.clear();   // shown for about 5 s
     handleInput();
+    updateMedia();
     draw();
     const u16 held = input_.held(0);
     quit_frames_ = ((held & PAD_BUTTON_START) && (held & PAD_TRIGGER_Z)) ? quit_frames_ + 1 : 0;
     return !picked_ && !calibrate_ && !back_ && quit_frames_ < 120;
+}
+
+// Like ITG, wait until the cursor has rested on a row before loading its banner and preview,
+// so scrolling through the wheel doesn't start a load per row.
+void SongSelect::updateMedia() {
+    const u64 now = cpuUs();
+    if (session_.pack != media_pack_ || session_.song != media_song_) {
+        media_pack_ = session_.pack;
+        media_song_ = session_.song;
+        media_moved_us_ = now;
+        media_requested_ = false;
+        media_.request("", "", 0, 0);   // drop the old banner and stop the old preview now
+    }
+    if (media_requested_ || now - media_moved_us_ < kMediaRestUs) return;
+    media_requested_ = true;
+    const ddr::SongLibrary& lib = session_.library;
+    if (const ddr::SongEntry* s = session_.chosen()) {
+        media_.request(s->banner.empty() ? "" : s->dir + s->banner, s->MusicPath(), s->sampleStart,
+                       s->sampleLength);
+    } else if (session_.pack >= 0 && session_.pack < (int)lib.packs.size()) {
+        const ddr::PackEntry& p = lib.packs[session_.pack];
+        media_.request(p.banner.empty() ? "" : p.dir + p.banner, "", 0, 0);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -301,8 +326,8 @@ void SongSelect::draw() {
     font_.print(kLeftX, 24, kWhite, 1, "SELECT MUSIC  %s",
                 session_.config.playMode == ddr::PlayMode::Competitive ? "COMPETITIVE" : "CASUAL");
     char buf[48];
-    std::snprintf(buf, sizeof buf, "%d songs  scan %lu ms", (int)session_.library.SongCount(),
-                  (unsigned long)(session_.scan_us / 1000));
+    std::snprintf(buf, sizeof buf, "%d songs  scan %lu ms  %d cached", (int)session_.library.SongCount(),
+                  (unsigned long)(session_.scan_us / 1000), session_.cache_hits);
     font_.print(600 - std::strlen(buf) * kGlyph, 24, kGrey, 1, "%s", buf);
     drawSongInfo(s);
     drawGrid(s);
@@ -321,13 +346,17 @@ void SongSelect::draw() {
 
 void SongSelect::drawSongInfo(const ddr::SongEntry* s) {
     const ddr::SongLibrary& lib = session_.library;
-    // Banner placeholder (real banners in M5 step 6): the title on a dark panel.
+    // The banner once SongMedia has loaded it, else the title on a dark panel.
     render::rect(kLeftX, kBannerY, kLeftW, kBannerH, kDark);
     render::rect(kLeftX, kBannerY + kBannerH - 3, kLeftW, 3,
                  s ? difficultyColour(ddr::Difficulty::Medium) : kPackBg);
     const float cx = kLeftX + kLeftW / 2;
     const int fit = (int)(kLeftW / kGlyph) - 2;
-    if (s) {
+    if (const GRRLIB_texImg* bn = media_.banner()) {
+        GRRLIB_SetAntiAliasing(true);   // filtered: it's scaled
+        render::img(kLeftX, kBannerY, bn, 0, kLeftW / bn->w, (kBannerH - 3) / bn->h, 0xFFFFFFFF);
+        GRRLIB_SetAntiAliasing(false);
+    } else if (s) {
         const float scale = (int)s->title.size() * kGlyph * 2 <= kLeftW - 16 ? 2 : 1;
         printCentred(font_, cx, kBannerY + 30, kWhite, scale, s->title, fit);
         printCentred(font_, cx, kBannerY + 66, kGrey, 1, s->subtitle, fit);

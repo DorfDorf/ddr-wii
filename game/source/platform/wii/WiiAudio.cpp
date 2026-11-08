@@ -86,12 +86,15 @@ struct Source {
     virtual ~Source() {}
     // Writes up to `frames` frames to dst; returns how many (fewer only at the end).
     virtual u32 read(u8* dst, u32 frames) = 0;
+    // Moves the read position to `frame` (0 = the start). False if it can't.
+    virtual bool seek(u32 frame) = 0;
 };
 
 // WAV: streamed from the SD card (a 5-minute WAV is ~55 MB, too big to keep in memory).
 struct WavSource : Source {
     FILE* f = nullptr;
     u32 left = 0;
+    long data_offset = 0;
 
     explicit WavSource(FILE* file) : f(file) {}
     ~WavSource() override { fclose(f); }
@@ -105,6 +108,7 @@ struct WavSource : Source {
         if (!audio::parseWavHeader(head, n, size > 0 ? (u64)size : 0, info))
             return "not a 16-bit PCM WAV";
         fseek(f, info.data_offset, SEEK_SET);
+        data_offset = (long)info.data_offset;
         rate = info.rate;
         channels = info.channels;
         total_frames = left = info.frames();
@@ -116,6 +120,12 @@ struct WavSource : Source {
         const u32 got = frames ? fread(dst, 2 * channels, frames, f) : 0;
         left = got < frames ? 0 : left - got;
         return got;
+    }
+    bool seek(u32 frame) override {
+        if (frame > total_frames) frame = total_frames;
+        if (fseek(f, data_offset + (long)frame * 2 * channels, SEEK_SET) != 0) return false;
+        left = total_frames - frame;
+        return true;
     }
 };
 
@@ -176,6 +186,7 @@ struct OggSource : Source {
         }
         return bytes / frame_bytes;
     }
+    bool seek(u32 frame) override { return ov_pcm_seek(&vf, frame) == 0; }
 };
 
 // MP3: the whole file is read into memory, then decoded with libmad. Timing follows ITGmania
@@ -305,6 +316,46 @@ struct Mp3Source : Source {
         pcm_len = synth.pcm.length;
         return true;
     }
+    // Back to the start, then skip whole frames by their headers (fast, no decoding) up to
+    // two frames before `target`. Those two are decoded and dropped so the bit reservoir the
+    // next frame may need is filled, and the rest of the frame is skipped sample by sample.
+    bool seek(u32 target) override {
+        mad_synth_finish(&synth);
+        mad_frame_finish(&frame);
+        mad_stream_finish(&stream);
+        mad_stream_init(&stream);
+        mad_frame_init(&frame);
+        mad_synth_init(&synth);
+        mad_stream_buffer(&stream, data, size + MAD_BUFFER_GUARD);
+        first_frame = true;
+        pcm_pos = pcm_len = 0;
+        u32 at = 0;   // output samples before the stream's position
+        const u32 per = 1152;
+        while (at + 3 * per <= target) {
+            if (mad_header_decode(&frame.header, &stream) != 0) {
+                if (stream.error == MAD_ERROR_BUFLEN) return false;
+                if (stream.error == MAD_ERROR_LOSTSYNC) skipId3(&stream);
+                if (MAD_RECOVERABLE(stream.error)) continue;
+                return false;
+            }
+            if (first_frame) {
+                first_frame = false;
+                int unused;
+                if (tagType(stream.this_frame, data + size, &unused) == 'X') continue;
+            }
+            at += 32 * MAD_NSBSAMPLES(&frame.header);
+        }
+        while (at < target) {
+            if (!nextFrame()) return false;
+            if (at + pcm_len > target) {
+                pcm_pos = target - at;
+                return true;
+            }
+            at += pcm_len;
+            pcm_pos = pcm_len;
+        }
+        return true;
+    }
     static s16 toS16(mad_fixed_t x) {
         x += 1L << (MAD_F_FRACBITS - 16);   // round
         if (x >= MAD_F_ONE) x = MAD_F_ONE - 1;
@@ -415,7 +466,7 @@ void* AudioStream::fillThread(void* self) {
     return nullptr;
 }
 
-bool AudioStream::open(const char* path) {
+bool AudioStream::open(const char* path, double start_s) {
     close();
     initAsnd();
     FILE* f = fopen(path, "rb");
@@ -443,17 +494,26 @@ bool AudioStream::open(const char* path) {
         error_ = err;
         return false;
     }
+    if (start_s > 0 && !src->seek((u32)(start_s * src->rate))) {
+        delete src;
+        error_ = "can't seek to the start time";
+        return false;
+    }
     source_ = src;
     rate_ = src->rate;
     channels_ = src->channels;
     total_frames_ = src->total_frames;
     start_delay_frames_ = src->start_delay_frames;
     start_delay_known_ = src->start_delay_known;
+    error_ = "";
+    startFill();
+    return true;
+}
+
+void AudioStream::startFill() {
     frames_read_ = 0;
     read_max_us_ = 0;
     decode_us_ = 0;
-    error_ = "";
-
     g_active = false;
     g_filled = g_queued = g_finished = 0;
     g_eof = false;
@@ -471,7 +531,33 @@ bool AudioStream::open(const char* path) {
     lwp_t t;
     LWP_CreateThread(&t, fillThread, this, nullptr, 16 * 1024, 80);   // high priority; it mostly sleeps
     lwp_ = (u32)t;
+}
+
+void AudioStream::stopFill() {
+    g_active = false;
+    ASND_StopVoice(0);
+    stop_ = true;
+    LWP_JoinThread((lwp_t)lwp_, nullptr);
+    playing_ = false;
+}
+
+bool AudioStream::restart(double start_s) {
+    if (!source_) return false;
+    stopFill();
+    Source* src = (Source*)source_;
+    if (!src->seek(start_s > 0 ? (u32)(start_s * src->rate) : 0)) {
+        error_ = "can't seek to the start time";
+        return false;
+    }
+    startFill();
     return true;
+}
+
+void AudioStream::setVolume(int volume) {
+    if (volume < 0) volume = 0;
+    if (volume > 255) volume = 255;
+    volume_ = volume;
+    if (playing_) ASND_ChangeVolumeVoice(0, volume, volume);
 }
 
 void AudioStream::play() {
@@ -481,7 +567,7 @@ void AudioStream::play() {
                                    : (le ? VOICE_MONO_16BIT_LE : VOICE_MONO_16BIT);
     const u32 level = IRQ_Disable();
     g_ring_min = N;
-    ASND_SetVoice(0, fmt, rate_, 0, g_buf[0], g_bytes[0], 255, 255, voiceCallback);
+    ASND_SetVoice(0, fmt, rate_, 0, g_buf[0], g_bytes[0], volume_, volume_, voiceCallback);
     g_queued = 1;
     // ASND may refuse the second buffer until the DSP has taken the new voice; the
     // callback then queues it on the next tick.
@@ -493,13 +579,9 @@ void AudioStream::play() {
 
 void AudioStream::close() {
     if (!source_) return;
-    g_active = false;
-    ASND_StopVoice(0);
-    stop_ = true;
-    LWP_JoinThread((lwp_t)lwp_, nullptr);
+    stopFill();
     delete (Source*)source_;
     source_ = nullptr;
-    playing_ = false;
 }
 
 AudioStream::Report AudioStream::report() const {
