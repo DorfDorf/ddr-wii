@@ -290,6 +290,7 @@ The logical canvas is 640 px wide. Four lanes at 64 px are 256 px, so:
   - Playfields stay inside the **action-safe area** (5% margin: x 32–608, y 24–456). For 3–4P that means four 144 px columns with **32 px lanes** (scale 0.5), slightly smaller than the 36 px tested.
   - Text and HUD (scores, life bars, judgement, combo, debug overlay) stay inside the **title-safe area** (10% margin: x 64–576, y 48–432).
   - An **overscan adjustment** in Options (shrink or grow the safe area per TV, stored in `config.ini`) covers TVs that crop more or less.
+- **Correction (2026-11-08, M4c):** every scene drew the arrow sprites 32 px left of and above where they should be. The textures use `GRRLIB_SetMidHandle`, so GRRLIB already draws them centred on the given position, and the code subtracted half the sprite size as well. So the M2b finding that P1's left lane lost its left edge in 4P was at least partly this bug. Recheck that edge when 4P is picked up. The life-bar and bottom-edge losses came from rectangles and still stand.
 - **4-player readability: passed** (M2b, 2026-11-08). 36 px arrows were readable from playing distance on the test TV. When 4P is picked up, recheck at 32 px lanes inside the safe area. A 16:9 mode (Wii set to widescreen, drawing for an 854 px-wide logical canvas, lanes about 48 px wide on screen) remains an option if needed.
 
 ### 11.4 Rules

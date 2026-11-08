@@ -131,7 +131,7 @@ void PlayfieldStress::drawBackground() {
 
 void PlayfieldStress::drawPlayfield(int player, const Layout& l, float beat) {
     const float h = video_.height();
-    const float half = kArt / 2.0f;          // GRRLIB positions by the unscaled top-left
+    // ArrowArt textures have a mid handle (GRRLIB_SetMidHandle): positions are sprite centres.
     const float size = kArt * l.scale;        // on-screen sprite size
     const float ppb = kSpeedMod * l.spacing;  // pixels per beat
     auto laneX = [&](int lane) { return l.centre_x + (lane - 1.5f) * l.spacing; };
@@ -148,7 +148,7 @@ void PlayfieldStress::drawPlayfield(int player, const Layout& l, float beat) {
 
     // Receptors with a beat glow behind them (large translucent quads).
     for (int lane = 0; lane < 4; lane++) {
-        const float x = laneX(lane) - half, y = kReceptorY - half;
+        const float x = laneX(lane), y = kReceptorY;
         render::img(x, y, art_.glow, 0, 1.6f * l.scale, 1.6f * l.scale, withAlpha(0xFFFFFFFF, 0.25f + 0.35f * pulse));
         const bool pressed = player == 0 && (held_ & kLaneButton[lane]);
         const float s = l.scale * (pressed ? 0.9f : 1.0f + 0.10f * pulse);
@@ -166,8 +166,8 @@ void PlayfieldStress::drawPlayfield(int player, const Layout& l, float beat) {
         const int lane = (k + player) & 3;
         const float y0 = beatY(b0 < beat ? beat : b0), y1 = beatY(b1);
         const float cy = (y0 + y1) / 2.0f;
-        render::img(laneX(lane) - half, cy - half, art_.hold, 0, l.scale, (y1 - y0) / kArt, 0x80FF80FF);
-        render::img(laneX(lane) - half, y1 - half, art_.glow, 0, 0.6f * l.scale, 0.6f * l.scale, 0x80FF80C0);
+        render::img(laneX(lane), cy, art_.hold, 0, l.scale, (y1 - y0) / kArt, 0x80FF80FF);
+        render::img(laneX(lane), y1, art_.glow, 0, 0.6f * l.scale, 0.6f * l.scale, 0x80FF80C0);
     }
 
     // Notes: a jump on every 16th row.
@@ -176,10 +176,10 @@ void PlayfieldStress::drawPlayfield(int player, const Layout& l, float beat) {
         const float b = row / 4.0f;
         if (b < beat - 0.02f) continue;   // already hit (judged on arrival)
         const u32 colour = (row % 4 == 0) ? kColour4th : (row % 2 == 0) ? kColour8th : kColour16th;
-        const float y = beatY(b) - half;
+        const float y = beatY(b);
         for (int j = 0; j < 2; j++) {
             const int lane = kJumps[(row + player) % 6][j];
-            render::img(laneX(lane) - half, y, art_.note, kLaneDegrees[lane], l.scale, l.scale, colour);
+            render::img(laneX(lane), y, art_.note, kLaneDegrees[lane], l.scale, l.scale, colour);
         }
     }
 
@@ -187,7 +187,7 @@ void PlayfieldStress::drawPlayfield(int player, const Layout& l, float beat) {
     const float row_frac = beat * 4.0f - floorf(beat * 4.0f);
     for (int lane = 0; lane < 4; lane++) {
         const float s = l.scale * (1.2f + 0.8f * row_frac);
-        render::img(laneX(lane) - half, kReceptorY - half, art_.glow, 0, s, s,
+        render::img(laneX(lane), kReceptorY, art_.glow, 0, s, s,
                     withAlpha(0xFFF0A0FF, 0.8f * (1.0f - row_frac)));
     }
 

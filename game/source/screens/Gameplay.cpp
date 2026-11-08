@@ -302,7 +302,8 @@ void Gameplay::drainJudge(Player& p, u64 now_us) {
 
 void Gameplay::drawPlayer(Player& p, double beat, u64 now_us) {
     const float h = video_.height();
-    const float half = kArt / 2.0f;   // GRRLIB positions by the unscaled top-left
+    // ArrowArt textures have a mid handle (GRRLIB_SetMidHandle), so GRRLIB draws them centred
+    // on the position given, scaled and rotated around that centre.
     const float ppb = kSpeed * kLane;
     auto laneX = [&](int lane) { return p.centre_x + (lane - 1.5f) * kLane; };
     auto beatY = [&](double b) { return kReceptorY + (float)((b - beat) * ppb); };
@@ -314,7 +315,7 @@ void Gameplay::drawPlayer(Player& p, double beat, u64 now_us) {
 
     // Receptors, lit while the lane is down, with a glow in the grade's colour after a hit.
     for (int lane = 0; lane < 4; lane++) {
-        const float x = laneX(lane) - half, y = kReceptorY - half;
+        const float x = laneX(lane), y = kReceptorY;
         const bool pressed = p.autoplay ? p.judge.laneDown(lane) : (held & kLaneButton[lane]) != 0;
         const float s = pressed ? 0.9f : 1.0f;
         render::img(x, y, art_.receptor, kLaneDegrees[lane], s, s, pressed ? 0xFFFFFFFF : 0xB0B0B0FF);
@@ -338,10 +339,10 @@ void Gameplay::drawPlayer(Player& p, double beat, u64 now_us) {
         const double b0 = n.row / 48.0;
         if (beatY(b0) > h + kArt) break;
         const bool missed = n.grade == game::Grade::Miss;
-        const float x = laneX(n.lane) - half;
+        const float x = laneX(n.lane);
         if (!n.hold) {
             if (n.grade != game::Grade::None && !missed) continue;   // hit: gone
-            render::img(x, beatY(b0) - half, art_.note, kLaneDegrees[n.lane], 1, 1,
+            render::img(x, beatY(b0), art_.note, kLaneDegrees[n.lane], 1, 1,
                         missed ? 0x707070A0 : quantColour(n.row));
             continue;
         }
@@ -353,10 +354,10 @@ void Gameplay::drawPlayer(Player& p, double beat, u64 now_us) {
         if (yt < -kArt) continue;
         if (yt > yh) {
             const u32 body = dead ? 0x606060A0 : (active && p.judge.laneDown(n.lane)) ? 0x90FF90FF : 0x50B050FF;
-            render::img(x, (yh + yt) / 2 - half, art_.hold, 0, 1, (yt - yh) / kArt, body);
+            render::img(x, (yh + yt) / 2, art_.hold, 0, 1, (yt - yh) / kArt, body);
         }
-        render::img(x, yt - half, art_.glow, 0, 0.6f, 0.6f, dead ? 0x606060A0 : 0x80FF80C0);
-        render::img(x, yh - half, art_.note, kLaneDegrees[n.lane], 1, 1,
+        render::img(x, yt, art_.glow, 0, 0.6f, 0.6f, dead ? 0x606060A0 : 0x80FF80C0);
+        render::img(x, yh, art_.note, kLaneDegrees[n.lane], 1, 1,
                     dead ? 0x707070A0 : quantColour(n.row));
     }
 
