@@ -166,6 +166,7 @@ What it shows:
 | **Success** | Start → choose song → play → results → back, repeated 20 times without a crash or leak (watch the heap display). Library scan < 5 s with the cache |
 | **Risks** | SD scan speed. Memory fragmentation from repeated song loads (fix: fixed MEM2 arenas). Odd simfiles |
 | **Reuse** | Dance Clone song-menu ideas (reference) |
+| **Status** | **Not started.** Planned (2026-11-08) as six small PRs, each tested in Dolphin before the next: (1) **song library**: scan `sd:/ddrwii/songs/<pack>/<song>/` for `.sm`/`.ssc`, read `pack.ini` titles and `SyncOffset`, sort by pack then title; portable in `core/`, PC-tested on a fake folder tree, then timed on the real card. (2) **song select → gameplay**: a plain text list by pack, difficulty per player, START-to-join by port (doc 06 §11.2), then the existing gameplay screen with any OGG or MP3. Also here: a MEM2 heap for song files, and chart time that keeps running after the audio ends (M4c open items 1, 3, 5). (3) **`config.ini` + offset calibration screen** on the click track (doc 06 §3.5). (4) **life bar and fail**, scroll speed, mines and rolls (M4c item 2). (5) **high scores** on SD, written to a temp file then renamed, with ITG's dance-point weights and letter grades (M4c item 4) before anything is saved. (6) **polish**: banners, preview audio, and the library cache if the scan is slow. After step 2 the owner's own packs play on the Wii, which is the best point for a hardware session |
 
 ## M6 — Physical Wii validation and polish (ongoing)
 
