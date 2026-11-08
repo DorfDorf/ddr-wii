@@ -5,7 +5,8 @@
 // For now the song is the generated test song (tools/make-test-song.py, staged by
 // tools/stage-sd.sh). Music plays through wii::AudioStream; SongClock follows ASND's
 // mixing tick as in the M4b test. Notes scroll by beat. Each player has their own chart,
-// Judge and autoplay switch and is bound to a pad port, so 2P only needs a second entry.
+// Judge and autoplay switch and is bound to a pad port. P2 joins on the ready screen;
+// the results show every player side by side.
 #pragma once
 
 #include <gctypes.h>
@@ -56,11 +57,15 @@ private:
     void loadSong();
     void start();
     void stop(State next);
-    void handleMenu(u16 down);
+    void layout();
+    void handleMenu();
     void handleEvents(double offset_us);
     void drainJudge(Player& p, u64 now_us);
     void drawPlayer(Player& p, double beat, u64 now_us);
     void drawHud(double chart_s);
+    void drawReady();
+    void drawResults();
+    std::string playerLabel(const Player& p) const;
 
     wii::Video& video_;
     const wii::Input& input_;
@@ -73,7 +78,7 @@ private:
     ddr::Song song_;
     std::vector<int> charts_;   // dance-single charts in song_.charts
     std::vector<Player> players_;
-    double offset_s_ = 0;       // globalOffset (doc 06 ง3.2): chart time = song time + this
+    double offset_s_ = 0;       // globalOffset (doc 06 ยง3.2): chart time = song time + this
 
     wii::AudioStream stream_;
     timing::SongClock clock_;

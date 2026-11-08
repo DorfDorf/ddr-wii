@@ -62,6 +62,9 @@ u32 withAlpha(u32 rgba, float a) {
 
 u64 cpuUs() { return ticks_to_microsecs(gettime()); }
 
+const game::Grade kShown[] = {game::Grade::Marvelous, game::Grade::Perfect, game::Grade::Great,
+                              game::Grade::Good, game::Grade::Boo, game::Grade::Miss};
+
 void printCentred(const render::Font& font, float cx, float y, u32 colour, float scale, const char* text) {
     const float w = std::strlen(text) * render::Font::kGlyphW * scale;
     font.print(cx - w / 2, y, colour, scale, "%s", text);
@@ -91,10 +94,10 @@ void Gameplay::loadSong() {
         state_ = State::Error;
         return;
     }
-    // One player for now, on port 1. 2P adds a second entry at x = 160 / 480 (doc 06 §11.3).
+    // P1 on port 1; P2 joins on the ready screen.
     players_.resize(1);
     players_[0].port = 0;
-    players_[0].centre_x = 320;
+    layout();
     state_ = State::Ready;
 }
 
@@ -133,11 +136,14 @@ void Gameplay::stop(State next) {
 }
 
 bool Gameplay::frame() {
-    const u16 down = input_.down(0), held = input_.held(0);
+    const u16 held = input_.held(0);
     const u64 now_us = cpuUs();
 
     if (state_ == State::Playing) {
-        if ((down & PAD_BUTTON_START) && !(held & PAD_TRIGGER_Z)) {
+        bool quit = false;   // START on any joined port (not START+Z, the exit chord)
+        for (const Player& p : players_)
+            quit = quit || ((input_.down(p.port) & PAD_BUTTON_START) && !(input_.held(p.port) & PAD_TRIGGER_Z));
+        if (quit) {
             stop(State::Ready);
         } else {
             const wii::AudioStream::TickReport t = stream_.tickReport();
@@ -169,36 +175,88 @@ bool Gameplay::frame() {
             }
         }
     } else {
-        handleMenu(down);
+        handleMenu();
     }
 
     render::rect(0, 0, video_.width(), video_.height(), 0x101828FF);
-    if (state_ != State::Error) {
+    if (state_ == State::Playing) {
         for (Player& p : players_) {
             const ddr::TimingData& td = song_.TimingFor(song_.charts[charts_[p.chart]]);
             drawPlayer(p, td.GetBeatFromElapsedTime(chart_s_), now_us);
         }
     }
-    drawHud(chart_s_);
+    GRRLIB_SetAntiAliasing(false);   // the bitmap font is drawn without filtering
+    if (state_ == State::Playing) {
+        drawHud(chart_s_);
+    } else if (state_ == State::Ready) {
+        drawReady();
+    } else if (state_ == State::Done) {
+        drawResults();
+    } else {
+        font_.print(64, 200, 0xFF5050FF, 1, "%s", error_.c_str());
+        font_.print(64, 220, 0xB0B0B0FF, 1, "Run tools/stage-sd.sh and copy sd/ to the card.");
+    }
+    GRRLIB_SetAntiAliasing(true);
 
     quit_frames_ = ((held & PAD_BUTTON_START) && (held & PAD_TRIGGER_Z)) ? quit_frames_ + 1 : 0;
     return quit_frames_ < 120;
 }
 
-void Gameplay::handleMenu(u16 down) {
+// doc 06 §11.3: 1P centred, 2P versus at x = 160 / 480.
+void Gameplay::layout() {
+    if (players_.size() == 1) {
+        players_[0].centre_x = 320;
+    } else {
+        players_[0].centre_x = 160;
+        players_[1].centre_x = 480;
+    }
+}
+
+// Ready screen (doc 06 §11.2, simplified for M4c):
+//   any joined port: Up/Down its chart, Z its autoplay;
+//   port 1: Left/Right global offset, Y adds/removes an autoplay P2 (port 2), X changes
+//           that P2's chart (for testing with one pad or the keyboard);
+//   port 2: START joins as a human P2;
+//   A or START on a joined port plays.
+void Gameplay::handleMenu() {
     if (state_ == State::Error) return;
-    Player& p = players_[0];
+    const u16 down0 = input_.down(0);
     if (state_ == State::Done) {
-        if (down & (PAD_BUTTON_START | PAD_BUTTON_A)) state_ = State::Ready;
+        for (const Player& p : players_)
+            if (input_.down(p.port) & (PAD_BUTTON_START | PAD_BUTTON_A)) state_ = State::Ready;
         return;
     }
     const int n = (int)charts_.size();
-    if (down & PAD_BUTTON_UP) p.chart = (p.chart + n - 1) % n;
-    if (down & PAD_BUTTON_DOWN) p.chart = (p.chart + 1) % n;
-    if (down & PAD_BUTTON_LEFT) offset_s_ -= kOffsetStepS;
-    if (down & PAD_BUTTON_RIGHT) offset_s_ += kOffsetStepS;
-    if (down & PAD_TRIGGER_Z) p.autoplay = !p.autoplay;
-    if (down & (PAD_BUTTON_A | PAD_BUTTON_START)) start();
+    if (players_.size() == 1 && (input_.down(1) & PAD_BUTTON_START)) {
+        players_.push_back(Player());
+        players_[1].port = 1;
+        players_[1].chart = std::min(players_[0].chart + 1, n - 1);
+        layout();
+        return;   // the join press doesn't also start the song
+    }
+    if (down0 & PAD_BUTTON_Y) {
+        if (players_.size() == 1) {
+            players_.push_back(Player());
+            players_[1].port = 1;
+            players_[1].autoplay = true;
+            players_[1].chart = (players_[0].chart + 1) % n;
+        } else {
+            players_.pop_back();
+        }
+        layout();
+    }
+    if ((down0 & PAD_BUTTON_X) && players_.size() > 1) players_[1].chart = (players_[1].chart + 1) % n;
+    if (down0 & PAD_BUTTON_LEFT) offset_s_ -= kOffsetStepS;
+    if (down0 & PAD_BUTTON_RIGHT) offset_s_ += kOffsetStepS;
+    bool play = false;
+    for (Player& p : players_) {
+        const u16 d = input_.down(p.port);
+        if (d & PAD_BUTTON_UP) p.chart = (p.chart + n - 1) % n;
+        if (d & PAD_BUTTON_DOWN) p.chart = (p.chart + 1) % n;
+        if (d & PAD_TRIGGER_Z) p.autoplay = !p.autoplay;
+        if (d & (PAD_BUTTON_A | PAD_BUTTON_START)) play = true;
+    }
+    if (play) start();
 }
 
 // Lane events carry the CPU time they were sampled at; SongClock's map turns that into
@@ -251,7 +309,7 @@ void Gameplay::drawPlayer(Player& p, double beat, u64 now_us) {
     const u16 held = input_.held(p.port);
 
     // Lane channel.
-    const float field_w = 4.5f * kLane;
+    const float field_w = 4 * kLane;   // 2P: x 32-288 and 352-608, inside action-safe
     render::rect(p.centre_x - field_w / 2, 0, field_w, h, 0x00000070);
 
     // Receptors, lit while the lane is down, with a glow in the grade's colour after a hit.
@@ -302,7 +360,7 @@ void Gameplay::drawPlayer(Player& p, double beat, u64 now_us) {
                     dead ? 0x707070A0 : quantColour(n.row));
     }
 
-    // Judgement, ms error and combo.
+    // Judgement, ms error, combo and score.
     char buf[48];
     if (p.row_grade != game::Grade::None && now_us - p.row_grade_us < kGradeShowUs)
         printCentred(font_, p.centre_x, 196, gradeColour(p.row_grade), 2, game::GradeName(p.row_grade));
@@ -312,70 +370,93 @@ void Gameplay::drawPlayer(Player& p, double beat, u64 now_us) {
                       p.note_early_only ? " (kept)" : "");
         printCentred(font_, p.centre_x, 232, 0xD0D0D0FF, 1, buf);
     }
-    if (state_ != State::Ready && p.judge.score().combo >= 2) {
+    if (p.judge.score().combo >= 2) {
         std::snprintf(buf, sizeof buf, "%d combo", p.judge.score().combo);
         printCentred(font_, p.centre_x, 252, 0xFFFFFFFF, 2, buf);
     }
+    std::snprintf(buf, sizeof buf, "%.2f%%", p.judge.score().percent());
+    printCentred(font_, p.centre_x, 340, 0xFFFFFFFF, 2, buf);
+    printCentred(font_, p.centre_x, 374, p.autoplay ? 0xFFC040FF : 0xB0B0B0FF, 1, playerLabel(p).c_str());
 }
 
-void Gameplay::drawHud(double chart_s) {
-    GRRLIB_SetAntiAliasing(false);
-    const u32 white = 0xFFFFFFFF, grey = 0xB0B0B0FF, warn = 0xFFC040FF, bad = 0xFF5050FF;
-    const u32 dropped = video_.stats().dropped_total;
-    // Text stays in the title-safe area (x 64-576, y 48-432; doc 06 §11.3).
-    if (state_ == State::Error) {
-        font_.print(64, 200, bad, 1, "%s", error_.c_str());
-        font_.print(64, 220, grey, 1, "Run tools/stage-sd.sh and copy sd/ to the card.");
-        GRRLIB_SetAntiAliasing(true);
-        return;
-    }
-    const Player& p = players_[0];
+std::string Gameplay::playerLabel(const Player& p) const {
     const ddr::Chart& c = song_.charts[charts_[p.chart]];
-    const game::Score& s = p.judge.score();
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "P%d %s %s %d", (int)(&p - players_.data()) + 1,
+                  p.autoplay ? "AUTO" : (p.port == 0 ? "port 1" : "port 2"),
+                  ddr::DifficultyToString(c.difficulty), c.meter);
+    return buf;
+}
 
-    font_.print(64, 48, white, 1, "%s", song_.title.c_str());
-    font_.print(64, 64, grey, 1, "%s %d", ddr::DifficultyToString(c.difficulty), c.meter);
-    font_.print(64, 80, p.autoplay ? warn : grey, 1, "%s", p.autoplay ? "AUTOPLAY" : "P1 port 1");
-    if (state_ != State::Ready) font_.print(472, 48, white, 2, "%6.2f%%", s.percent());
-
-    // Judgement counts (rows), holds, and the timing stats for calibration.
-    static const game::Grade kShown[] = {game::Grade::Marvelous, game::Grade::Perfect, game::Grade::Great,
-                                         game::Grade::Good, game::Grade::Boo, game::Grade::Miss};
-    float y = 120;
-    if (state_ != State::Ready) {   // the ready screen would show the previous run's
+// Text stays in the title-safe area (x 64-576, y 48-432; doc 06 §11.3).
+void Gameplay::drawHud(double chart_s) {
+    const u32 grey = 0xB0B0B0FF, warn = 0xFFC040FF, bad = 0xFF5050FF;
+    if (players_.size() == 1) {   // room beside a centred playfield for the running counts
+        const game::Score& s = players_[0].judge.score();
+        font_.print(64, 48, 0xFFFFFFFF, 1, "%s", song_.title.c_str());
+        float y = 120;
         for (game::Grade g : kShown) {
             font_.print(472, y, gradeColour(g), 1, "%-9s%4d", game::GradeName(g), s.rows[(int)g]);
             y += 16;
         }
-        font_.print(472, y + 8, white, 1, "OK %d NG %d", s.holds_held, s.holds_let_go);
-        font_.print(472, y + 24, white, 1, "max combo %d", s.max_combo);
+        font_.print(472, y + 8, 0xFFFFFFFF, 1, "OK %d NG %d", s.holds_held, s.holds_let_go);
+        font_.print(472, y + 24, 0xFFFFFFFF, 1, "max combo %d", s.max_combo);
         font_.print(472, y + 48, grey, 1, "mean %+.1f ms", s.meanOffset() * 1000);
         font_.print(472, y + 64, grey, 1, "sd   %.1f ms", s.offsetStdDev() * 1000);
         if (s.held_misses) font_.print(472, y + 80, warn, 1, "held miss %d", s.held_misses);
     }
+    const wii::AudioStream::Stats st = stream_.stats();
+    const u32 dropped = video_.stats().dropped_total;
+    font_.print(64, 400, st.underruns ? bad : grey, 1, "%6.2f s  offset %+.0f ms  underruns %lu",
+                chart_s, offset_s_ * 1000, (unsigned long)st.underruns);
+    font_.print(64, 416, dropped ? warn : grey, 1, "%s  dropped %lu  START stop", video_.modeName(),
+                (unsigned long)dropped);
+}
 
-    if (state_ == State::Ready) {
-        font_.print(64, 120, white, 1, "Charts:");
+void Gameplay::drawReady() {
+    const u32 white = 0xFFFFFFFF, grey = 0xB0B0B0FF, warn = 0xFFC040FF;
+    font_.print(64, 48, white, 2, "%s", song_.title.c_str());
+    font_.print(64, 84, grey, 1, "%s", song_.subtitle.c_str());
+    for (const Player& p : players_) {
+        const float x = p.centre_x - 88;
+        font_.print(x, 120, white, 1, "%s", playerLabel(p).c_str());
         for (size_t i = 0; i < charts_.size(); i++) {
-            const ddr::Chart& ci = song_.charts[charts_[i]];
-            font_.print(64, 140 + 16 * i, (int)i == p.chart ? warn : grey, 1, "%c %s %d",
-                        (int)i == p.chart ? '>' : ' ', ddr::DifficultyToString(ci.difficulty), ci.meter);
+            const ddr::Chart& c = song_.charts[charts_[i]];
+            font_.print(x, 144 + 16 * i, (int)i == p.chart ? warn : grey, 1, "%c %s %d",
+                        (int)i == p.chart ? '>' : ' ', ddr::DifficultyToString(c.difficulty), c.meter);
         }
-        font_.print(64, 384, white, 1, "A/START play  Up/Down chart  Z autoplay");
-        font_.print(64, 400, white, 1, "Left/Right offset %+.0f ms (lower it if steps are late)",
-                    offset_s_ * 1000);
-    } else if (state_ == State::Done) {
-        font_.print(64, 384, white, 1, "Done: %.2f%%, max combo %d, mean %+.1f ms, sd %.1f ms",
-                    s.percent(), s.max_combo, s.meanOffset() * 1000, s.offsetStdDev() * 1000);
-        font_.print(64, 400, grey, 1, "A/START back");
-    } else {
-        const wii::AudioStream::Stats st = stream_.stats();
-        font_.print(64, 400, st.underruns ? bad : grey, 1, "%6.2f s  offset %+.0f ms  underruns %lu",
-                    chart_s, offset_s_ * 1000, (unsigned long)st.underruns);
     }
-    font_.print(64, 416, dropped ? warn : grey, 1, "%s  dropped %lu  B next test  START+Z 2 s exit",
-                video_.modeName(), (unsigned long)dropped);
-    GRRLIB_SetAntiAliasing(true);
+    if (players_.size() == 1) font_.print(64, 300, grey, 1, "P2: START on port 2, or Y for an autoplay P2");
+    font_.print(64, 336, white, 1, "A/START play   Up/Down chart   Z autoplay");
+    if (players_.size() > 1) font_.print(64, 352, white, 1, "Y remove P2   X change P2's chart");
+    font_.print(64, 368, white, 1, "Left/Right offset %+.0f ms (lower it if steps are late)", offset_s_ * 1000);
+    font_.print(64, 416, grey, 1, "%s   B next test   START+Z 2 s exit", video_.modeName());
+}
+
+// Results (doc 06 §7): one column per player.
+void Gameplay::drawResults() {
+    const u32 white = 0xFFFFFFFF, grey = 0xB0B0B0FF, warn = 0xFFC040FF;
+    font_.print(64, 48, white, 2, "%s", song_.title.c_str());
+    for (const Player& p : players_) {
+        const game::Score& s = p.judge.score();
+        const float x = p.centre_x - 88;
+        char buf[32];
+        printCentred(font_, p.centre_x, 92, p.autoplay ? warn : grey, 1, playerLabel(p).c_str());
+        std::snprintf(buf, sizeof buf, "%.2f%%", s.percent());
+        printCentred(font_, p.centre_x, 112, white, 3, buf);
+        float y = 172;
+        for (game::Grade g : kShown) {
+            font_.print(x, y, gradeColour(g), 1, "%-10s%5d", game::GradeName(g), s.rows[(int)g]);
+            y += 16;
+        }
+        font_.print(x, y + 8, white, 1, "%-10s%5d", "Held", s.holds_held);
+        font_.print(x, y + 24, white, 1, "%-10s%5d", "Let go", s.holds_let_go);
+        font_.print(x, y + 40, white, 1, "%-10s%5d", "Max combo", s.max_combo);
+        font_.print(x, y + 64, grey, 1, "mean %+6.1f ms", s.meanOffset() * 1000);
+        font_.print(x, y + 80, grey, 1, "sd   %6.1f ms", s.offsetStdDev() * 1000);
+        if (s.held_misses) font_.print(x, y + 96, warn, 1, "held misses %d", s.held_misses);
+    }
+    font_.print(64, 416, grey, 1, "A/START back");
 }
 
 }  // namespace screens

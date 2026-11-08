@@ -273,6 +273,7 @@ Memory cost is small: a chart is a few thousand notes, so four of them are tens 
 - **Joining:** on the title screen and song select, pressing Start on a port joins it as the next player, DDR style. Leaving goes through B/Z on that port before the song starts. The player number follows join order, not the port number, so one mat in port 3 is still P1.
 - **Menus:** any joined player can move the song wheel. Difficulty and scroll speed are chosen per player on the difficulty screen, with each player's cursor in their own column. The song starts when every joined player has confirmed.
 - **Pause:** Start on any joined port pauses for everyone.
+- **For now (M4c):** the gameplay scene's ready screen does the joining. START on port 2 adds a human P2, and Y on port 1 adds an autoplay P2 for testing with one pad or the keyboard. START during a song stops it (there's no pause yet).
 
 ### 11.3 Playfield layout
 
