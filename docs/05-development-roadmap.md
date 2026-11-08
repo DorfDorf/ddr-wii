@@ -44,9 +44,9 @@ M1 Toolchain ─► M2 Graphics ─► M3 Pad test (Dolphin + real Wii) ─► M
 |---|---|
 | **Needs you** | Little. Claude can patch a copy and build it. You decide whether to run the old v0.5 binary |
 | **Objective** | Get a working reference DDR on modern tools, to compare input behaviour and feel |
-| **Steps** | Copy `reference/extracted/danceclonewii/source/DanceClone-master` to `build-experiments/danceclone/` (never edit the original). `pacman -S` the Wii SDL 1.2 packages. Apply the patches listed in doc 07 §5.1 (drop `-lSDL_net`, add portlibs paths, remove the `dirData` check, `SND_Init` → `ASND_Init`, replace `boost::iequals`) and record every change in `PATCHES.md` |
-| **Alternative** | Run the shipped v0.5 `boot.dol` in Dolphin (it's an untrusted binary, but Dolphin is sandboxed. You decide whether to run it) |
-| **Success** | Boots in Dolphin and plays its demo song |
+| **Steps** | Copy `reference/extracted/danceclonewii/source/DanceClone-master` to `build-experiments/danceclone/` (never edit the original). `pacman -S` the Wii SDL 1.2 packages. Apply the patches listed in doc 07 §5.1: drop `-lSDL_net`, point the include/lib paths at `$(PORTLIBS)`, replace `boost::iequals`, and keep `mp3Buffer` alive until `StopMusic` (it's freed while playing). `dirData` and `SND_Init` compile as they are. Record every change in `PATCHES.md`. **Give it copies of simfiles only:** v0.68 rewrites `.sm` files that lack radar values |
+| **Alternative** | Run the shipped v0.5 `boot.dol` in Dolphin (it's an untrusted binary, but Dolphin is sandboxed. You decide whether to run it). v0.5 plays its own demo song |
+| **Success** | Boots in Dolphin and plays a hand-made test `.sm` (v0.68 can't read the v0.5 `.dc` demo). The chart needs a one-line `#BPMS`, a negative `#OFFSET`, no meter of 8, and only 4/8/16-row measures (doc 07 §3) |
 | **Stop rule** | If it isn't building after one focused session, abandon it. It isn't on the critical path |
 
 ## M2 — Graphics
@@ -70,11 +70,11 @@ M1 Toolchain ─► M2 Graphics ─► M3 Pad test (Dolphin + real Wii) ─► M
 | **Objective** | Prove the GameCube dance mat reaches our code correctly, including jumps and timestamps |
 | **Tools** | `padtest.dol`, the Dolphin keyboard profile (doc 03 §4.4), **Wii with HBC** (doc 03 §6), SD card or wiiload |
 | **Steps** | (a) Dolphin: keyboard-mapped Standard Controller. (b) Real Wii: mat in port 1, run padtest via HBC. (c) Optional: the mat via a Wii U GC adapter in Dolphin |
-| **Output** | A recorded table: mat SI type, per-panel bits, max simultaneous panels, PAD sample interval min/max |
+| **Output** | A recorded table: mat SI type, per-panel bits, max simultaneous panels, PAD sample interval min/max, and how long each panel bounces on press and release. That sets the debounce window; ITGmania defaults to 20 ms for pads |
 | **Success** | Mat shows `GC standard (PAD ok)`. All 4 arrows map correctly. L+R and U+D jumps register. Releases clear within one frame. Sampling interval measured |
 | **Risks** | Mat reports a non-standard SI type (low likelihood, doc 04 §3; fallback is raw SI reads). The keyboard can't hold some 3-key combinations (a hardware limit). Installing HBC (follow wii.hacks.guide, make a NAND backup) |
 | **Reuse** | Dance Clone `WiiInput.cpp` approach (reference) |
-| **Then** | Integrate as `platform/wii/WiiInput` with timestamped `LaneEvent`s (doc 04 §8). Show lane states on the M2 scene |
+| **Then** | Integrate as `platform/wii/WiiInput` with timestamped, debounced `LaneEvent`s (doc 04 §8, doc 06 §3.4). Show lane states on the M2 scene. Add held-miss logging for stuck-panel diagnosis |
 
 ## M4a — Chart parser + timing engine on the PC (can run in parallel)
 
@@ -83,11 +83,11 @@ M1 Toolchain ─► M2 Graphics ─► M3 Pad test (Dolphin + real Wii) ─► M
 | **Needs you** | Nearly nothing. This is fully automatable: Claude writes the parser, the oracle script and the tests, and runs them. You can supply a few real simfiles from your packs |
 | **Objective** | Load `.sm` and `.ssc` correctly, and convert beat ↔ seconds exactly |
 | **Tools** | PC compiler (MSVC, or MinGW g++ from MSYS2), Python `simfile` (MIT) as the oracle |
-| **Steps** | Port `MsdFile.cpp`, the `NotesLoaderSM.cpp` logic and `TimingData` from `reference/extracted/stepmaniawii/stepmania-wii/trunk/` into `game/source/core/` (keep the MIT notices). Add the SSC loader, DELAYS and WARPS. Write `tools/simfile-oracle.py`, which dumps `(beat, seconds)` for every note, and compare in `game/tests/` |
+| **Steps** | Port the SM5-era `MsdFile`, the `TimingData` algorithms (`GetBeatInternal`, `GetElapsedTimeInternal`, `GetDisplayedBeat`), the `NotesLoaderSM` tag handling with `ProcessBPMsAndStops`, and `NotesLoaderSSC` from **ITGmania tag `v1.3.0`** (`itgmania/itgmania`, GPLv3, matching this project's licence) into `game/source/core/`. Keep the original notices, add our GPL-3.0-or-later header, and note what we changed. Skip the Lua, editor and cache code. Use StepMania 3.9 (`stepmania/stepmania` tag `v390release`) as the small, readable reference. Port `pack.ini` (`Group`) parsing with its `SyncOffset`. Write `tools/simfile-oracle.py`, which dumps `(beat, seconds)` for every note, and compare in `game/tests/` |
 | **Test corpus** | ~20 charts: constant BPM, many BPM changes, stops, delays (.ssc), split timing, odd whitespace/comments, all quantisations, holds, mines. Include `garcia/simfile`'s testdata |
 | **Success** | Every note time matches the oracle within 0.1 ms. No crashes on malformed files (fuzz with truncated files) |
 | **Risks** | SSC edge cases (spec page "in progress"). Mitigated by the oracle |
-| **Reuse** | **High** (StepMania 3.9 algorithms) |
+| **Reuse** | **High** (ITGmania `v1.3.0` code, GPLv3; SM 3.9 as reference) |
 
 ## M4b — Audio clock experiment
 
@@ -99,7 +99,7 @@ M1 Toolchain ─► M2 Graphics ─► M3 Pad test (Dolphin + real Wii) ─► M
 | **Steps** | Start with **WAV** (no decoder) at 44.1 and 48 kHz → then OGG via Tremor → then MP3 via libmad. Implement the ring buffer, decode thread and voice callback (doc 06 §4). Show on screen: `SongClock::now()`, `ASND_GetTimerVoice(0)`, the difference between them, and buffer underruns. Add a metronome test: flash the screen and play a click on every beat of a 120 BPM WAV |
 | **Success** | No underruns over a 5-minute track. Clock jitter < 1 ms (frame to frame). Drift against `ASND_GetTimerVoice` < 2 ms over 5 min. Visual flash and audible click line up in Dolphin and on the Wii (judged by eye/ear, then with a phone slow-motion video) |
 | **Risks** | **The biggest technical risk in the project** (see the final answer in the summary). ASND callback timing semantics. Decoder CPU cost. Dolphin audio latency differs from hardware |
-| **Reuse** | StepMania-Wii `RageSoundDriver_Wii.cpp` structure (re-implemented, MIT) |
+| **Reuse** | The double-buffered voice + fill-thread shape of StepMania-Wii's `RageSoundDriver_Wii.cpp`, re-implemented from the asndlib docs. Don't copy code: the file has no licence, the project may be GPLv2-only (which can't be combined with our GPLv3), and its position logic is broken (doc 07 §6 row 6) |
 
 ## M4c — Basic rhythm engine
 
@@ -111,7 +111,7 @@ M1 Toolchain ─► M2 Graphics ─► M3 Pad test (Dolphin + real Wii) ─► M
 | **Test** | Play a simple 4th-note chart with the keyboard in Dolphin, then with the mat on the Wii. Use the "autoplay" debug mode (perfect inputs generated from the chart): every judgement must be Marvelous |
 | **Success** | Autoplay gives 100% Marvelous. A human gets consistent ms error (a stable mean, which is the latency to calibrate away). Holds work |
 | **Risks** | Input-to-song-time conversion bugs (caught by autoplay) |
-| **Reuse** | Dance Clone judgement/jump logic as reference |
+| **Reuse** | Dance Clone judgement/jump logic as reference. ITGmania's early-hit rule (doc 06 §3.4), ported from `v1.3.0` |
 
 ## M5 — Playable prototype
 
@@ -119,7 +119,7 @@ M1 Toolchain ─► M2 Graphics ─► M3 Pad test (Dolphin + real Wii) ─► M
 |---|---|
 | **Needs you** | Copy your song packs to the SD card, play many sessions, report crashes and bad charts. Most of the code is routine for Claude |
 | **Objective** | A real game loop over many songs |
-| **Features** | SongLibrary scan + cache, song wheel with banners and preview audio, difficulty select (Beginner…Challenge), scroll speed option, life bar + fail, results with grade, high scores saved to SD, **offset calibration screen**, `config.ini` |
+| **Features** | SongLibrary scan + cache (with `pack.ini` titles, banners and `SyncOffset`), song wheel with banners and preview audio, difficulty select (Beginner…Challenge), scroll speed option, life bar + fail, results with grade, high scores saved to SD, **offset calibration screen**, `config.ini` |
 | **Test** | 50+ songs from your own StepMania packs (a mix of .sm and .ssc, OGG and MP3) |
 | **Success** | Start → choose song → play → results → back, repeated 20 times without a crash or leak (watch the heap display). Library scan < 5 s with the cache |
 | **Risks** | SD scan speed. Memory fragmentation from repeated song loads (fix: fixed MEM2 arenas). Odd simfiles |

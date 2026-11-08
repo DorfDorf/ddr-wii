@@ -1,6 +1,8 @@
 # 07a — Audit of the Existing-Codebase Review (doc 07)
 
-*Audited 2026-11-08. I checked the claims and citations in [07-existing-codebase-review.md](07-existing-codebase-review.md) against the extracted source in `reference/extracted/`. Claims about today's toolchain were checked against upstream sources: devkitPro libogc, newlib and pacman-packages, Dolphin and StepMania, read through the GitHub API, plus the Google Code Archive metadata for `stepmania-wii`. Nothing was compiled or run. Only text files and JSON metadata were downloaded. The archived StepMania-Wii binary was only checked with a HEAD request. Line numbers like "(line 100)" refer to doc 07.*
+*Audited 2026-11-08. I checked the claims and citations in [07-existing-codebase-review.md](07-existing-codebase-review.md) against the extracted source in `reference/extracted/`. Claims about today's toolchain were checked against upstream sources: devkitPro libogc, newlib and pacman-packages, Dolphin and StepMania, read through the GitHub API, plus the Google Code Archive metadata for `stepmania-wii`. Nothing was compiled or run. Only text files and JSON metadata were downloaded. The archived StepMania-Wii binary was only checked with a HEAD request. Line numbers like "(line 100)" refer to doc 07 as it was before the corrections.*
+
+*Status: **applied 2026-11-08.** Every correction below has been made in docs 07, 01, 02, 05, 06 and `sources.md`. Line numbers in this audit refer to those docs as they were before the edits.*
 
 ## Verdict
 
