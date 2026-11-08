@@ -23,8 +23,15 @@ Run the PC tests before committing changes to `game/source/core/`, and build the
 - Every new source file starts with `// SPDX-License-Identifier: GPL-3.0-or-later`.
 - Code ported from ITGmania v1.3.0 keeps its original notices and lists what changed (see `core/timing/TimingData.cpp`).
 - Never copy code from StepMania-Wii's Wii files (no licence, possibly GPLv2-only); re-implement the idea instead. Dance Clone's code may be used, but never ship its art, sounds or fonts. Details in doc 07 §8.
-- `reference/` is read-only and stays out of git, and so do songs. Placeholder art is generated in code (`render/ArrowArt`, `render/Font`).
+- `reference/` is read-only and stays out of git.
 - Shell scripts and Makefiles keep LF line endings.
+
+## Assets
+
+- Until real art exists, placeholders are generated in code (`render/ArrowArt`, `render/Font`).
+- Small files the game embeds (images, fonts, sound effects) go in `game/data/`. The Makefile only has a build rule for `.jpg`, so add a matching rule for each new file type (for example `%.png.o %_png.h : %.png`).
+- Every asset that isn't generated in code gets a line in `game/data/CREDITS.md`: where it came from and its licence. Only add files whose licence allows sharing them with the game.
+- Songs stay on the SD card and never go in git. Make test audio (click tracks) with a script.
 
 ## Key decisions
 
