@@ -776,6 +776,9 @@ static void TestSongClock() {
   CHECK(h.snaps() == 1 && h.now(6000000) == 10000000);
   h.observe(6100000, 0);
   CHECK(h.snaps() == 2 && h.now(6100000) == 0);
+  // Free run (the audio has ended): no hold, the CPU clock carries on.
+  h.freeRun();
+  CHECK(h.now(9100000) == 3000000);
 }
 
 
@@ -1038,6 +1041,9 @@ static void TestSongLibrary(const std::string& dir) {
     CHECK(zeta.title == "Zeta");
     CHECK(zeta.music == "ZETA.OGG");       // #MUSIC matched ignoring case
     CHECK(zeta.banner == "zeta-bn.png");
+    CHECK(zeta.bpmMin == 120 && zeta.bpmMax == 120);
+    CHECK_NEAR(zeta.lengthSeconds, 1.5, 1e-9);   // 4 rows of 4ths at 120 BPM
+    CHECK(zeta.charts.size() == 1 && zeta.charts[0].steps == 4 && zeta.charts[0].jumps == 0);
     CHECK(zeta.SimfilePath() == dir + "/library/B Pack/Zeta/zeta.sm");
     CHECK(zeta.MusicPath() == dir + "/library/B Pack/Zeta/ZETA.OGG");
   }

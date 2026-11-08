@@ -21,7 +21,7 @@ int64_t SongClock::now(uint64_t cpu_us) {
     if (!started_) return 0;
     // Stop at kHoldUs past the last report: if the audio stalls, so does the song.
     uint64_t t = cpu_us;
-    if (t > last_report_cpu_ + kHoldUs) t = last_report_cpu_ + kHoldUs;
+    if (!free_run_ && t > last_report_cpu_ + kHoldUs) t = last_report_cpu_ + kHoldUs;
     const int64_t v = (int64_t)((double)t + offset_us_);
     if (v > last_now_) last_now_ = v;
     return last_now_;

@@ -20,8 +20,6 @@
 namespace screens {
 namespace {
 
-constexpr const char* kSongsRoot = "sd:/ddrwii/songs";
-constexpr const char* kTestSongFolder = "Click 120";   // starts here if found
 
 constexpr float kArt = render::ArrowArt::kSize;
 constexpr float kLane = 64.0f;          // lane spacing, 1-2 players (doc 06 §11.3)
@@ -30,7 +28,6 @@ constexpr float kSpeed = 2.0f;          // scroll: lane widths per beat
 constexpr double kEndPadS = 2.0;        // stay on the playfield after the last note
 constexpr u64 kFlashUs = 150000;        // receptor glow after a hit
 constexpr u64 kGradeShowUs = 900000;    // judgement text
-constexpr double kOffsetStepS = 0.005;
 
 constexpr float kLaneDegrees[4] = {-90.0f, 180.0f, 0.0f, 90.0f};   // art points up
 constexpr u16 kLaneButton[4] = {PAD_BUTTON_LEFT, PAD_BUTTON_DOWN, PAD_BUTTON_UP, PAD_BUTTON_RIGHT};
@@ -74,59 +71,44 @@ void printCentred(const render::Font& font, float cx, float y, u32 colour, float
 }  // namespace
 
 Gameplay::Gameplay(wii::Video& video, const wii::Input& input, const render::ArrowArt& art,
-                   const render::Font& font)
-    : video_(video), input_(input), art_(art), font_(font) {
-    // P1 on port 1; P2 joins on the ready screen.
-    players_.resize(1);
-    players_[0].port = 0;
-    layout();
-    scanLibrary();
-    if (!songs_.empty()) loadSong();
+                   const render::Font& font, const Session& session)
+    : video_(video), input_(input), art_(art), font_(font), offset_s_(session.offset_s) {
+    if (loadSong(session)) start();
 }
 
-void Gameplay::scanLibrary() {
-    const u64 t0 = cpuUs();
-    if (!ddr::ScanSongLibrary(kSongsRoot, library_)) {
-        error_ = std::string("can't open ") + kSongsRoot;
-        return;
+bool Gameplay::loadSong(const Session& session) {
+    const ddr::SongEntry* entry = session.chosen();
+    if (!entry || session.players.empty()) {
+        error_ = "no song or no players";
+        return false;
     }
-    scan_us_ = cpuUs() - t0;
-    for (size_t p = 0; p < library_.packs.size(); p++)
-        for (size_t s = 0; s < library_.packs[p].songs.size(); s++) {
-            if (library_.packs[p].songs[s].folder == kTestSongFolder) song_index_ = (int)songs_.size();
-            songs_.push_back({(int)p, (int)s});
+    song_dir_ = entry->dir;
+    music_ = entry->music;
+    if (!ddr::LoadSongFile(entry->SimfilePath(), song_)) {
+        error_ = "can't load " + entry->SimfilePath();
+        return false;
+    }
+    song_.SetGroupOffset(session.library.packs[session.pack].info.syncOffset);
+    for (const SessionPlayer& sp : session.players) {
+        Player p;
+        p.port = sp.port;
+        p.autoplay = sp.autoplay;
+        const int ci = sp.chart < (int)entry->charts.size() ? entry->charts[sp.chart].index : -1;
+        if (ci < 0 || ci >= (int)song_.charts.size() || song_.charts[ci].notes.empty()) {
+            error_ = "chart missing in " + entry->SimfilePath();
+            return false;
         }
-    if (songs_.empty()) error_ = std::string("no playable songs in ") + kSongsRoot;
-}
-
-void Gameplay::loadSong() {
-    const ddr::PackEntry& pack = library_.packs[songs_[song_index_].pack];
-    const ddr::SongEntry& entry = pack.songs[songs_[song_index_].song];
-    song_ = ddr::Song();
-    charts_.clear();
-    song_dir_ = entry.dir;
-    music_ = entry.music;
-    if (!ddr::LoadSongFile(entry.SimfilePath(), song_)) {
-        error_ = "can't load " + entry.SimfilePath();
-        state_ = State::Error;
-        return;
+        p.chart = ci;
+        players_.push_back(std::move(p));
     }
-    song_.SetGroupOffset(pack.info.syncOffset);
-    for (const ddr::ChartInfo& c : entry.charts)
-        if (c.index < (int)song_.charts.size()) charts_.push_back(c.index);
-    if (charts_.empty()) {
-        error_ = "no dance-single charts in " + entry.SimfilePath();
-        state_ = State::Error;
-        return;
-    }
-    for (Player& p : players_) p.chart = std::min(p.chart, (int)charts_.size() - 1);
-    state_ = State::Ready;
+    layout();
+    return true;
 }
 
 void Gameplay::start() {
     end_s_ = 0;
     for (Player& p : players_) {
-        const ddr::Chart& c = song_.charts[charts_[p.chart]];
+        const ddr::Chart& c = song_.charts[p.chart];
         p.judge.load(c.notes, c.numTracks);
         p.steps = game::MakeAutoplay(p.judge);
         p.next_step = 0;
@@ -166,7 +148,7 @@ bool Gameplay::frame() {
         for (const Player& p : players_)
             quit = quit || ((input_.down(p.port) & PAD_BUTTON_START) && !(input_.held(p.port) & PAD_TRIGGER_Z));
         if (quit) {
-            stop(State::Ready);
+            stop(State::Done);
         } else {
             const wii::AudioStream::TickReport t = stream_.tickReport();
             if (t.count != last_tick_report_) {
@@ -193,30 +175,33 @@ bool Gameplay::frame() {
                     drainJudge(p, now_us);
                     all_done = all_done && p.judge.finished();
                 }
-                if ((all_done && chart_s_ >= end_s_) || stream_.stats().finished) stop(State::Done);
+                // Audio over: keep chart time running on the CPU clock (M4c open item 1).
+                if (stream_.stats().finished) clock_.freeRun();
+                if (all_done && chart_s_ >= end_s_) stop(State::Done);
             }
         }
     } else {
-        handleMenu();
+        // Results or error: A/START (or B on an error) on any port goes back to song select.
+        for (int port = 0; port < wii::Input::kPorts; port++)
+            if ((input_.down(port) & (PAD_BUTTON_START | PAD_BUTTON_A)) && !(input_.held(port) & PAD_TRIGGER_Z))
+                return false;
     }
 
     render::rect(0, 0, video_.width(), video_.height(), 0x101828FF);
     if (state_ == State::Playing) {
         for (Player& p : players_) {
-            const ddr::TimingData& td = song_.TimingFor(song_.charts[charts_[p.chart]]);
+            const ddr::TimingData& td = song_.TimingFor(song_.charts[p.chart]);
             drawPlayer(p, td.GetBeatFromElapsedTime(chart_s_), now_us);
         }
     }
     GRRLIB_SetAntiAliasing(false);   // the bitmap font is drawn without filtering
     if (state_ == State::Playing) {
         drawHud(chart_s_);
-    } else if (state_ == State::Ready) {
-        drawReady();
     } else if (state_ == State::Done) {
         drawResults();
     } else {
         font_.print(64, 200, 0xFF5050FF, 1, "%s", error_.c_str());
-        font_.print(64, 220, 0xB0B0B0FF, 1, "Run tools/stage-sd.sh and copy sd/ to the card.");
+        font_.print(64, 220, 0xB0B0B0FF, 1, "A/START back");
     }
     GRRLIB_SetAntiAliasing(true);
 
@@ -232,61 +217,6 @@ void Gameplay::layout() {
         players_[0].centre_x = 160;
         players_[1].centre_x = 480;
     }
-}
-
-// Ready screen (doc 06 §11.2, simplified for M4c):
-//   any joined port: Up/Down its chart, Z its autoplay;
-//   port 1: Left/Right global offset, Y adds/removes an autoplay P2 (port 2), X changes
-//           that P2's chart (for testing with one pad or the keyboard);
-//   port 2: START joins as a human P2;
-//   A or START on a joined port plays.
-void Gameplay::handleMenu() {
-    const u16 down0 = input_.down(0);
-    // L/R on port 1: previous/next song in the library (until song select, M5 step 2).
-    // Also from the error screen, so one bad simfile doesn't block the rest.
-    if (state_ != State::Done && (down0 & (PAD_TRIGGER_L | PAD_TRIGGER_R)) && songs_.size() > 1) {
-        const int m = (int)songs_.size();
-        song_index_ = (song_index_ + ((down0 & PAD_TRIGGER_L) ? m - 1 : 1)) % m;
-        loadSong();
-        return;
-    }
-    if (state_ == State::Error) return;
-    if (state_ == State::Done) {
-        for (const Player& p : players_)
-            if (input_.down(p.port) & (PAD_BUTTON_START | PAD_BUTTON_A)) state_ = State::Ready;
-        return;
-    }
-    const int n = (int)charts_.size();
-    if (players_.size() == 1 && (input_.down(1) & PAD_BUTTON_START)) {
-        players_.push_back(Player());
-        players_[1].port = 1;
-        players_[1].chart = std::min(players_[0].chart + 1, n - 1);
-        layout();
-        return;   // the join press doesn't also start the song
-    }
-    if (down0 & PAD_BUTTON_Y) {
-        if (players_.size() == 1) {
-            players_.push_back(Player());
-            players_[1].port = 1;
-            players_[1].autoplay = true;
-            players_[1].chart = (players_[0].chart + 1) % n;
-        } else {
-            players_.pop_back();
-        }
-        layout();
-    }
-    if ((down0 & PAD_BUTTON_X) && players_.size() > 1) players_[1].chart = (players_[1].chart + 1) % n;
-    if (down0 & PAD_BUTTON_LEFT) offset_s_ -= kOffsetStepS;
-    if (down0 & PAD_BUTTON_RIGHT) offset_s_ += kOffsetStepS;
-    bool play = false;
-    for (Player& p : players_) {
-        const u16 d = input_.down(p.port);
-        if (d & PAD_BUTTON_UP) p.chart = (p.chart + n - 1) % n;
-        if (d & PAD_BUTTON_DOWN) p.chart = (p.chart + 1) % n;
-        if (d & PAD_TRIGGER_Z) p.autoplay = !p.autoplay;
-        if (d & (PAD_BUTTON_A | PAD_BUTTON_START)) play = true;
-    }
-    if (play) start();
 }
 
 // Lane events carry the CPU time they were sampled at; SongClock's map turns that into
@@ -411,10 +341,11 @@ void Gameplay::drawPlayer(Player& p, double beat, u64 now_us) {
 }
 
 std::string Gameplay::playerLabel(const Player& p) const {
-    const ddr::Chart& c = song_.charts[charts_[p.chart]];
-    char buf[64];
+    const ddr::Chart& c = song_.charts[p.chart];
+    char buf[64], port[24];
+    std::snprintf(port, sizeof port, "port %d", p.port + 1);
     std::snprintf(buf, sizeof buf, "P%d %s %s %d", (int)(&p - players_.data()) + 1,
-                  p.autoplay ? "AUTO" : (p.port == 0 ? "port 1" : "port 2"),
+                  p.autoplay ? "AUTO" : port,
                   ddr::DifficultyToString(c.difficulty), c.meter);
     return buf;
 }
@@ -442,32 +373,6 @@ void Gameplay::drawHud(double chart_s) {
                 chart_s, offset_s_ * 1000, (unsigned long)st.underruns);
     font_.print(64, 416, dropped ? warn : grey, 1, "%s  dropped %lu  START stop", video_.modeName(),
                 (unsigned long)dropped);
-}
-
-void Gameplay::drawReady() {
-    const u32 white = 0xFFFFFFFF, grey = 0xB0B0B0FF, warn = 0xFFC040FF;
-    const ddr::PackEntry& pack = library_.packs[songs_[song_index_].pack];
-    font_.print(64, 32, grey, 1, "%s   song %d/%d   L/R change", pack.info.displayTitle.c_str(),
-                song_index_ + 1, (int)songs_.size());
-    font_.print(64, 48, white, 2, "%s", song_.title.c_str());
-    font_.print(64, 84, grey, 1, "%s", song_.subtitle.c_str());
-    for (const Player& p : players_) {
-        const float x = p.centre_x - 88;
-        font_.print(x, 120, white, 1, "%s", playerLabel(p).c_str());
-        for (size_t i = 0; i < charts_.size(); i++) {
-            const ddr::Chart& c = song_.charts[charts_[i]];
-            font_.print(x, 144 + 16 * i, (int)i == p.chart ? warn : grey, 1, "%c %s %d",
-                        (int)i == p.chart ? '>' : ' ', ddr::DifficultyToString(c.difficulty), c.meter);
-        }
-    }
-    if (players_.size() == 1) font_.print(64, 300, grey, 1, "P2: START on port 2, or Y for an autoplay P2");
-    font_.print(64, 336, white, 1, "A/START play   Up/Down chart   Z autoplay");
-    if (players_.size() > 1) font_.print(64, 352, white, 1, "Y remove P2   X change P2's chart");
-    font_.print(64, 368, white, 1, "Left/Right offset %+.0f ms (lower it if steps are late)", offset_s_ * 1000);
-    font_.print(64, 400, grey, 1, "library: %d packs, %d songs, %d skipped, scan %lu ms",
-                (int)library_.packs.size(), (int)songs_.size(), (int)library_.warnings.size(),
-                (unsigned long)(scan_us_ / 1000));
-    font_.print(64, 416, grey, 1, "%s   B next test   START+Z 2 s exit", video_.modeName());
 }
 
 // Results (doc 06 §7): one column per player.

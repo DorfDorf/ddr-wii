@@ -31,12 +31,17 @@ public:
     // previous now() result.
     int64_t now(uint64_t cpu_us);
 
+    // The audio has ended: from now on the clock runs on the CPU clock instead of stopping
+    // kHoldUs after the last report, so a chart that outlasts its audio still plays out.
+    void freeRun() { free_run_ = true; }
+
     bool started() const { return started_; }
     uint32_t snaps() const { return snaps_; }      // offset jumps after the first report
     double offsetUs() const { return offset_us_; }
 
 private:
     bool started_ = false;
+    bool free_run_ = false;
     double offset_us_ = 0;
     uint64_t last_report_cpu_ = 0;
     int64_t last_now_ = 0;

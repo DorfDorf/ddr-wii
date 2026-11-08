@@ -31,6 +31,10 @@ struct ChartInfo {
   Difficulty difficulty = Difficulty::Beginner;
   int meter = 1;
   std::string description;
+  // Counts for the select screen (as ITG's pane): judgable notes only.
+  int steps = 0;   // rows with a tap, hold or roll head
+  int jumps = 0;   // rows with two or more of them
+  int holds = 0, rolls = 0, mines = 0;
 };
 
 struct SongEntry {
@@ -42,6 +46,9 @@ struct SongEntry {
   std::string title, subtitle, artist;
   std::string titleTranslit, subtitleTranslit;
   double sampleStart = 0, sampleLength = 0;
+  double bpmMin = 0, bpmMax = 0;  // #DISPLAYBPM if set, else the song's BPM segments
+  bool bpmRandom = false;         // #DISPLAYBPM:*
+  double lengthSeconds = 0;       // last note (or hold end) of the longest chart
   std::vector<ChartInfo> charts;  // dance-single only, sorted by difficulty
 
   std::string SimfilePath() const { return dir + simfile; }

@@ -42,6 +42,7 @@ Run the PC tests before committing changes to `game/source/core/`, and build the
 - MP3s decode like ITGmania v1.3.0: no gapless trim, a `Xing` first frame skipped but an `Info` one played (doc 06 §4).
 - The dance mat is read as a standard GameCube controller, one mat per port (doc 04).
 - The game reads pads only through `wii::Input` (SI polling interrupt + `PAD_Read`, timestamped and debounced), never `PAD_ScanPads`/`PAD_ButtonsHeld`: SI gives each new sample to one reader. libogc 3.2.1's `PAD_SetSamplingCallback` is a no-op (doc 04 §5).
+- Menus follow ITGmania's Simply Love theme (GPLv3) for layout, colours and controls, redrawn with our own placeholder graphics; no theme files are copied (doc 06 §7).
 - 2 players now, 4 after M6 (doc 06 §11). Playfields stay inside the TV's safe area (doc 06 §11.3).
 
 ## Docs
