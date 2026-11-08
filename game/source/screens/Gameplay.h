@@ -5,8 +5,11 @@
 // The song, the players (join order, each with their port, chart and autoplay switch) and the
 // global offset come from the Session. Music plays through wii::AudioStream; SongClock follows
 // ASND's mixing tick as in the M4b test, and runs on the CPU clock once the audio has ended so
-// a chart that outlasts its audio still plays out. Notes scroll by beat. START stops the song;
-// A/START on the results goes back to song select.
+// a chart that outlasts its audio still plays out. Notes scroll by beat at each player's
+// speed (ITG x-mod: 1x = 64 px per beat). Mines and rolls are judged (core/game/Judge).
+// Competitive mode adds ITG's life bar (core/game/LifeMeter): a player whose bar empties fails,
+// their playfield greys out and stops judging, and the song ends once everyone has failed
+// (doc 06 §11.4). START stops the song; A/START on the results goes back to song select.
 #pragma once
 
 #include <gctypes.h>
@@ -16,6 +19,7 @@
 
 #include "core/chart/Chart.h"
 #include "core/game/Judge.h"
+#include "core/game/LifeMeter.h"
 #include "screens/Session.h"
 #include "core/timing/SongClock.h"
 #include "platform/wii/WiiAudio.h"
@@ -43,6 +47,11 @@ private:
         int chart = 0;              // index into song_.charts
         bool autoplay = false;
         double input_offset_s = 0;  // config.ini [PortN] InputOffset
+        double speed = 2.0;         // scroll speed (x-mod)
+        game::LifeMeter life;       // Competitive only
+        bool failed = false;
+        u64 failed_us = 0;
+        u64 mine_flash_us[game::Judge::kMaxLanes] = {};
         float centre_x = 320;       // playfield layout (doc 06 §11.3)
         game::Judge judge;
         std::vector<game::AutoStep> steps;
@@ -65,6 +74,7 @@ private:
     void handleEvents(double offset_us);
     void drainJudge(Player& p, u64 now_us);
     void drawPlayer(Player& p, double beat, u64 now_us);
+    void drawLife(const Player& p);
     void drawHud(double chart_s);
     void drawResults();
     std::string playerLabel(const Player& p) const;
@@ -75,6 +85,8 @@ private:
     const render::Font& font_;
 
     State state_ = State::Error;
+    bool competitive_ = false;  // life bars and failing
+    u64 all_failed_us_ = 0;     // when the last player failed (the song ends shortly after)
     std::string error_;
     std::string song_dir_;
     std::string music_;        // file name in song_dir_

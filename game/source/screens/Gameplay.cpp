@@ -24,7 +24,8 @@ namespace {
 constexpr float kArt = render::ArrowArt::kSize;
 constexpr float kLane = 64.0f;          // lane spacing, 1-2 players (doc 06 §11.3)
 constexpr float kReceptorY = 80.0f;     // inside the title-safe area (y >= 48)
-constexpr float kSpeed = 2.0f;          // scroll: lane widths per beat
+constexpr float kLifeY = 30, kLifeH = 12;   // life bar above the receptors (action-safe)
+constexpr u64 kFailedEndUs = 1500000;   // everyone failed: show it this long, then results
 constexpr double kEndPadS = 2.0;        // stay on the playfield after the last note
 constexpr u64 kFlashUs = 150000;        // receptor glow after a hit
 constexpr u64 kGradeShowUs = 900000;    // judgement text
@@ -94,6 +95,7 @@ bool Gameplay::loadSong(const Session& session) {
         p.port = sp.port;
         p.autoplay = sp.autoplay;
         p.input_offset_s = session.config.ports[sp.port].inputOffsetS;
+        p.speed = sp.speed;
         const int ci = sp.chart < (int)entry->charts.size() ? entry->charts[sp.chart].index : -1;
         if (ci < 0 || ci >= (int)song_.charts.size() || song_.charts[ci].notes.empty()) {
             error_ = "chart missing in " + entry->SimfilePath();
@@ -102,6 +104,7 @@ bool Gameplay::loadSong(const Session& session) {
         p.chart = ci;
         players_.push_back(std::move(p));
     }
+    competitive_ = session.config.playMode == ddr::PlayMode::Competitive;
     layout();
     return true;
 }
@@ -117,8 +120,13 @@ void Gameplay::start() {
         p.row_grade = game::Grade::None;
         p.note_offset_us = p.row_grade_us = 0;
         std::fill(std::begin(p.lane_flash_us), std::end(p.lane_flash_us), 0);
+        std::fill(std::begin(p.mine_flash_us), std::end(p.mine_flash_us), 0);
+        p.life = game::LifeMeter();
+        p.failed = false;
         for (const game::Judge::NoteState& n : p.judge.notes()) end_s_ = std::max(end_s_, n.end_time);
+        for (const game::Judge::MineState& m : p.judge.mines()) end_s_ = std::max(end_s_, m.time);
     }
+    all_failed_us_ = 0;
     end_s_ += kEndPadS;
 
     stream_.close();
@@ -161,8 +169,10 @@ bool Gameplay::frame() {
                 // Steps first (they happened before now), then everything up to now.
                 handleEvents(clock_.offsetUs());
                 chart_s_ = clock_.now(now_us) / 1e6 + offset_s_;
-                bool all_done = true;
+                bool all_done = true, all_failed = true;
                 for (Player& p : players_) {
+                    all_failed = all_failed && p.failed;
+                    if (p.failed) continue;   // greyed out: no more judging
                     if (p.autoplay) {
                         while (p.next_step < p.steps.size() && p.steps[p.next_step].time <= chart_s_) {
                             const game::AutoStep& s = p.steps[p.next_step++];
@@ -174,11 +184,13 @@ bool Gameplay::frame() {
                     }
                     p.judge.update(chart_s_);
                     drainJudge(p, now_us);
-                    all_done = all_done && p.judge.finished();
+                    all_done = all_done && (p.failed || p.judge.finished());
                 }
+                if (all_failed && !all_failed_us_) all_failed_us_ = now_us;
                 // Audio over: keep chart time running on the CPU clock (M4c open item 1).
                 if (stream_.stats().finished) clock_.freeRun();
                 if (all_done && chart_s_ >= end_s_) stop(State::Done);
+                if (all_failed_us_ && now_us - all_failed_us_ > kFailedEndUs) stop(State::Done);
             }
         }
     } else {
@@ -227,7 +239,7 @@ void Gameplay::handleEvents(double offset_us) {
         const input::LaneEvent& e = input_.event(i);
         const double t0 = (e.time_us + offset_us) / 1e6 + offset_s_;
         for (Player& p : players_) {
-            if (p.autoplay || p.port != e.port) continue;
+            if (p.autoplay || p.failed || p.port != e.port) continue;
             const double t = t0 + p.input_offset_s;   // per-mat InputOffset (doc 06 §11.1)
             if (e.pressed)
                 p.judge.press(e.lane, t);
@@ -239,6 +251,15 @@ void Gameplay::handleEvents(double offset_us) {
 
 void Gameplay::drainJudge(Player& p, u64 now_us) {
     for (const game::JudgeEvent& e : p.judge.events()) {
+        if (competitive_ && !p.failed) {
+            p.life.apply(e);
+            if (p.life.failed()) {
+                p.failed = true;
+                p.failed_us = now_us;
+            }
+        }
+        if (e.kind == game::JudgeEvent::kMine && e.lane >= 0 && e.lane < game::Judge::kMaxLanes)
+            p.mine_flash_us[e.lane] = now_us;
         switch (e.kind) {
             case game::JudgeEvent::kNote:
             case game::JudgeEvent::kEarly:
@@ -256,6 +277,7 @@ void Gameplay::drainJudge(Player& p, u64 now_us) {
                 p.row_grade_us = now_us;
                 break;
             case game::JudgeEvent::kHold:
+            case game::JudgeEvent::kMine:
                 break;
         }
     }
@@ -266,7 +288,7 @@ void Gameplay::drawPlayer(Player& p, double beat, u64 now_us) {
     const float h = video_.height();
     // ArrowArt textures have a mid handle (GRRLIB_SetMidHandle), so GRRLIB draws them centred
     // on the position given, scaled and rotated around that centre.
-    const float ppb = kSpeed * kLane;
+    const float ppb = (float)p.speed * kLane;   // ITG: 1x = 64 px per beat
     auto laneX = [&](int lane) { return p.centre_x + (lane - 1.5f) * kLane; };
     auto beatY = [&](double b) { return kReceptorY + (float)((b - beat) * ppb); };
     const u16 held = input_.held(p.port);
@@ -287,6 +309,21 @@ void Gameplay::drawPlayer(Player& p, double beat, u64 now_us) {
             render::img(x, y, art_.glow, 0, 1.2f + 0.4f * (1 - k), 1.2f + 0.4f * (1 - k),
                         withAlpha(gradeColour(p.lane_flash[lane]), 0.8f * k));
         }
+        const u64 msince = now_us - p.mine_flash_us[lane];   // a mine went off: white burst
+        if (p.mine_flash_us[lane] && msince < 2 * kFlashUs) {
+            const float k = 1.0f - (float)msince / (2 * kFlashUs);
+            render::img(x, y, art_.glow, 0, 2.0f - k, 2.0f - k, withAlpha(0xFFFFFFFF, k));
+        }
+    }
+
+    // Mines still to come: a red blob with a white core.
+    for (const game::Judge::MineState& m : p.judge.mines()) {
+        if (m.state != game::Judge::MineState::kPending || m.lane < 0 || m.lane >= 4) continue;
+        const float y = beatY(m.row / 48.0);
+        if (y < -kArt) continue;
+        if (y > h + kArt) break;
+        render::img(laneX(m.lane), y, art_.glow, 0, 0.8f, 0.8f, 0xFF3030F0);
+        render::rect(laneX(m.lane) - 5, y - 5, 10, 10, 0xFFFFFFFF);
     }
 
     // Notes, scrolling up by beat (doc 06 §3.2). Notes are in row order; holds can reach
@@ -314,17 +351,31 @@ void Gameplay::drawPlayer(Player& p, double beat, u64 now_us) {
         const double hb = active ? std::max(b0, beat) : b0;
         const float yh = beatY(hb), yt = beatY(n.end_row / 48.0);
         if (yt < -kArt) continue;
-        if (yt > yh) {
-            const u32 body = dead ? 0x606060A0 : (active && p.judge.laneDown(n.lane)) ? 0x90FF90FF : 0x50B050FF;
+        if (yt - yh >= 1) {   // a sliver under 1 px (a short hold at its tail) blanked GX's textures
+            const bool lit = active && p.judge.laneDown(n.lane);
+            const u32 body = dead ? 0x606060A0
+                             : n.roll ? (lit ? 0xFFE080FF : 0xD0A030FF)    // rolls: amber
+                                      : (lit ? 0x90FF90FF : 0x50B050FF);   // holds: green
             render::img(x, (yh + yt) / 2, art_.hold, 0, 1, (yt - yh) / kArt, body);
         }
-        render::img(x, yt, art_.glow, 0, 0.6f, 0.6f, dead ? 0x606060A0 : 0x80FF80C0);
+        render::img(x, yt, art_.glow, 0, 0.6f, 0.6f, dead ? 0x606060A0 : n.roll ? 0xFFD060C0 : 0x80FF80C0);
         render::img(x, yh, art_.note, kLaneDegrees[n.lane], 1, 1,
                     dead ? 0x707070A0 : quantColour(n.row));
     }
 
+    if (p.failed) {   // greyed out (doc 06 §11.4)
+        render::rect(p.centre_x - field_w / 2, 0, field_w, h, 0x101828C0);
+        printCentred(font_, p.centre_x, 200, 0xFF4040FF, 3, "FAILED");
+    }
+    if (competitive_) drawLife(p);
+
     // Judgement, ms error, combo and score.
     char buf[48];
+    if (p.failed) {
+        std::snprintf(buf, sizeof buf, "%.2f%%", p.judge.score().percent());
+        printCentred(font_, p.centre_x, 340, 0xB0B0B0FF, 2, buf);
+        return;
+    }
     if (p.row_grade != game::Grade::None && now_us - p.row_grade_us < kGradeShowUs)
         printCentred(font_, p.centre_x, 196, gradeColour(p.row_grade), 2, game::GradeName(p.row_grade));
     if (p.note_offset_us && now_us - p.note_offset_us < kGradeShowUs) {
@@ -340,6 +391,18 @@ void Gameplay::drawPlayer(Player& p, double beat, u64 now_us) {
     std::snprintf(buf, sizeof buf, "%.2f%%", p.judge.score().percent());
     printCentred(font_, p.centre_x, 340, 0xFFFFFFFF, 2, buf);
     printCentred(font_, p.centre_x, 374, p.autoplay ? 0xFFC040FF : 0xB0B0B0FF, 1, playerLabel(p).c_str());
+}
+
+// ITG-style life bar across the top of the playfield: green, red when in danger, white when
+// full (hot). Failed: an empty outline.
+void Gameplay::drawLife(const Player& p) {
+    const float w = 4 * kLane - 16, x = p.centre_x - w / 2;
+    render::rect(x - 2, kLifeY - 2, w + 4, kLifeH + 4, 0xFFFFFFC0);
+    render::rect(x, kLifeY, w, kLifeH, 0x101828FF);
+    const double life = p.life.life();
+    if (life <= 0) return;
+    const u32 c = p.life.hot() ? 0xF0F8FFFF : p.life.danger() ? 0xFF4040FF : 0x50D070FF;
+    render::rect(x, kLifeY, (float)(w * life), kLifeH, c);
 }
 
 std::string Gameplay::playerLabel(const Player& p) const {
@@ -387,18 +450,20 @@ void Gameplay::drawResults() {
         char buf[32];
         printCentred(font_, p.centre_x, 92, p.autoplay ? warn : grey, 1, playerLabel(p).c_str());
         std::snprintf(buf, sizeof buf, "%.2f%%", s.percent());
-        printCentred(font_, p.centre_x, 112, white, 3, buf);
-        float y = 172;
+        printCentred(font_, p.centre_x, 112, p.failed ? 0xFF4040FF : white, 3, buf);
+        if (p.failed) printCentred(font_, p.centre_x, 162, 0xFF4040FF, 1, "FAILED");
+        float y = 182;
         for (game::Grade g : kShown) {
             font_.print(x, y, gradeColour(g), 1, "%-10s%5d", game::GradeName(g), s.rows[(int)g]);
             y += 16;
         }
         font_.print(x, y + 8, white, 1, "%-10s%5d", "Held", s.holds_held);
         font_.print(x, y + 24, white, 1, "%-10s%5d", "Let go", s.holds_let_go);
-        font_.print(x, y + 40, white, 1, "%-10s%5d", "Max combo", s.max_combo);
-        font_.print(x, y + 64, grey, 1, "mean %+6.1f ms", s.meanOffset() * 1000);
-        font_.print(x, y + 80, grey, 1, "sd   %6.1f ms", s.offsetStdDev() * 1000);
-        if (s.held_misses) font_.print(x, y + 96, warn, 1, "held misses %d", s.held_misses);
+        font_.print(x, y + 40, white, 1, "%-10s%5d", "Mines hit", s.mines_hit);
+        font_.print(x, y + 56, white, 1, "%-10s%5d", "Max combo", s.max_combo);
+        font_.print(x, y + 80, grey, 1, "mean %+6.1f ms", s.meanOffset() * 1000);
+        font_.print(x, y + 96, grey, 1, "sd   %6.1f ms", s.offsetStdDev() * 1000);
+        if (s.held_misses) font_.print(x, y + 112, warn, 1, "held misses %d", s.held_misses);
     }
     font_.print(64, 416, grey, 1, "A/START back");
 }

@@ -98,6 +98,8 @@ Windows (StepMania defaults, verified in SM 3.9 `PrefsManager.cpp:87-92`), all a
 | Boo | 0.180 | breaks |
 | Miss | note passes −0.180 unhit | breaks |
 | Hold OK/NG | release tolerance 0.250 (SM "OK" window) | — |
+| Roll OK/NG | at most 0.350 between presses (ITG `TimingWindowSecondsRoll`) | — |
+| Mine | a press within 0.070 of it (ITG `TimingWindowSecondsMine`) | — |
 
 - On each `LaneEvent(pressed, t)`: take the **closest unjudged note in that lane** with `|t − noteTime| ≤ BooWindow`. This fixes Dance Clone's known issue "a step between two very close arrows counts for the earlier arrow instead of the closest one" (`CHANGELOG v0.60`), which v0.68 still has (`Game.cpp:2595-2605`). A press for an incomplete jump must not fall through to a later note in the same lane.
 - **Early-hit rule** (ITGmania's fix for "way off towers", `27c6f7757a`; adapted from its `Player.cpp`):
@@ -112,7 +114,15 @@ Windows (StepMania defaults, verified in SM 3.9 `PrefsManager.cpp:87-92`), all a
   Tune the window from the bounce measured in M3.
 - **Held misses:** record when a note is missed while its lane is held down. It flags stuck or dead panels, as ITGmania does for pad debugging.
 - **Jumps:** notes on the same row are judged individually, but combo and score treat the row as one unit (worst judgement of the row). A row completes when all its lanes are hit or missed.
-- **Holds:** the head is judged like a tap. While held, the hold is OK. If released for longer than 0.250 s before the tail, it's NG. Rolls (`4`) come later.
+- **Holds:** the head is judged like a tap. While held, the hold is OK. If released for longer than 0.250 s before the tail, it's NG.
+- **Rolls (M5 step 4):** the head is judged like a tap. After that the lane must be pressed again at least every 0.350 s until the tail; holding it down doesn't count. The gap is the ITG roll window.
+- **Mines (M5 step 4):** a mine is hit if its lane was already down when it passed, or if a press lands within 0.070 s of it and the mine is closer than any note in that lane (as in StepMania, a step judges whichever is closer). Otherwise it's avoided. Mines only change life for now; dance points come with ITG's weights in step 5. Autoplay releases taps before a mine in the lane and taps through rolls every 0.1 s. It gives 100% Marvelous with no mine hit on all 45 corpus charts (64 mines).
+- **Life (Competitive only, M5 step 4):** `core/game/LifeMeter`, ported from ITGmania v1.3.0 `LifeMeterBar` (normal drain), with Simply Love's ITG-mode values:
+  - Start at 50%. Per row: Marvelous/Perfect +0.8%, Great +0.4%, Good 0, Boo −5%, Miss −10%.
+  - Hold held +0.8%, let go −8%. A missed hold head costs nothing extra (the Miss row already counted). Mine −5%.
+  - At full life, any loss is at least 10%.
+  - After a loss, gains wait for 5 good rows, stacking up to 10.
+  - Reaching 0 fails the player for good.
 - Show the timing error (ms, early or late) for calibration.
 - **Implementation (M4c):** `core/game/Judge`, one per player. It takes song seconds, so the caller converts `LaneEvent` timestamps with SongClock and the offsets. Dance points are per row (Marvelous/Perfect 2, Great 1, the rest 0) plus 2 per held hold. The early-hit rule follows ITGmania v1.3.0 `Player.cpp` [src]: only one-note rows, the first early bad grade is kept, and after that only a Great-or-better re-hit replaces it. `MakeAutoplay` gives the perfect inputs for the autoplay test and debug mode.
 
@@ -162,7 +172,8 @@ Use `ASND_TestPointer()` / `ASND_TestVoiceBufferReady()` (`asndlib.h:354`, `:363
 - 640×480 logical canvas. Four lanes of 64 px, centred. Receptors at y ≈ 80 (upward scroll, DDR style). With 2–4 players the lane width and playfield positions come from a layout table (§11.3).
 - **Arrow texture atlas:** one 256×256 PNG holding 4 directions × quantisation colours (4th red, 8th blue, 16th yellow, …, like Dance Clone's `Media/Game/04thnote.png`…`192ndnote.png`, which shows the idea). Rotate one arrow sprite instead of storing four.
 - **Receptor flash** on press, an **explosion** sprite on hit tinted by judgement, judgement text plus a combo counter (bitmap font), a life bar, and a score.
-- **Holds:** body tiled between head and tail, a cap at the tail, dimmed after NG.
+- **Holds:** body tiled between head and tail, a cap at the tail, dimmed after NG. Rolls are drawn the same in amber. Mines are a red blob with a white core, and a hit mine flashes white on its receptor.
+- **No sub-pixel quads.** A hold body under 1 px tall (a 1/32 hold reaching its tail, Y scale about 0.005) made every textured draw disappear for a second or more in Dolphin; rectangles still drew. `render::img` now skips any quad under a pixel in either direction (found in M5 step 4; the cause is inside GX/GRRLIB and wasn't tracked further).
 - Only draw notes within the visible beat range (a binary search into the sorted note array). Cost is O(visible).
 - Menus: a vertical song wheel (banner + title + BPM + difficulty meters), with the same renderer.
 
@@ -191,6 +202,8 @@ Options (scroll speed, global offset, calibration) reachable from Title.
 
 - **SongSelect:** a list from `SongLibrary` (scans `sd:/ddrwii/songs/*/*/`), sorted by pack then title. If a pack has a `pack.ini` (ITGmania's format: a `[Group]` section with `DisplayTitle`, `SortTitle`, `Series`, `Banner`, `Year`, `SyncOffset`), use its display title, sort title and banner, and apply its `SyncOffset` (§3.2). Ported from ITGmania's `Group.cpp`. Preview audio plays after a 0.5 s pause on an entry. **Built (M5 step 2):** `screens/SongSelect`. Its layout follows ITGmania's default theme, Simply Love (GPLv3), in 4:3: banner top left (a title placeholder until step 6), artist/BPM/length box, a difficulty grid with the meter in the difficulty's colour and ten meter blocks, one pane per player along the bottom with the chart's steps/jumps/holds/mines/rolls, and the music wheel on the right (pack headers, the open pack's songs under its header). It's redrawn with our own rects and bitmap font; no theme files are used. Colours are Simply Love's (its default colour index). Controls follow ITG on a mat: Left/Right move the wheel (held: repeat after 0.4 s), Up/Down change that player's difficulty, START opens/closes a pack or picks the song. Each player's difficulty is remembered from song to song (nearest chart if the song lacks it). Debug: Z toggles that player's autoplay, X leaves, Y on port 1 adds/removes an autoplay player, L/R on port 1 set the global offset in 5 ms steps (until `config.ini`, step 3), B on port 1 goes to the test scenes. START+Z for 2 s exits.
 - **SongLibrary cache:** parsing headers for hundreds of songs from SD is slow, so cache `{path, mtime, title, artist, bpm range, difficulties}` in `sd:/ddrwii/cache.bin` **[exp: measure the scan time]**.
+- **Play mode (M5 step 4):** `screens/PlayModeSelect` comes before song select, modelled on Simply Love's ScreenSelectPlayMode, with the choices on the left and a description on the right. **Casual** has no life bar, and nobody fails. **Competitive** has ITG's life bar and failing (§3.4). Timing and scoring are the same in both. The choice is saved as `PlayMode` in `config.ini`. B in song select goes back to this screen, and B on port 1 here opens the test scenes.
+- **Scroll speed (M5 step 4):** ITG x-mods, 1x = 64 px per beat, 0.25x to 8x in 0.25x steps. In song select, hold A and press Up/Down on your own pad. The speed is shown in your pane and saved per port as `ScrollSpeed` in `config.ini`, so each mat keeps its own. Only START picks a song now (A no longer does).
 - **Scoring (prototype):** "dance points" percentage, as in StepMania/ITG (Marvelous/Perfect = 100%, Great = 50%, Good/Boo/Miss = 0, holds OK = full credit) plus max combo and judgement counts. DDR-style money score can be added later (SM 3.9 `ScoreKeeperMAX2.cpp` as reference).
 - **High scores:** `scores.dat` is a small versioned binary or INI keyed by `songHash + difficulty`, storing the best percentage, combo and grade. It's written atomically (write a temp file, then rename).
 - **Settings:** `config.ini` holds `GlobalOffset`, `VisualOffset`, `DefaultSyncOffset` (`NULL` or `ITG`, for packs without `pack.ini`), `InputDebounceMs`, and per port (`[Port1]`…`[Port4]`) `LaneMap`, `InputOffset` and the last-used `ScrollSpeed`. See §11 for how ports become players. **Built (M5 step 3):** `core/config/Config` reads and writes `sd:/ddrwii/config.ini` with `[Options] GlobalOffset` (ms), `DefaultSyncOffset`, `InputDebounceMs` and `[PortN] InputOffset` (ms). Offsets are clamped to ±1 s, and bad or missing values keep the defaults. It's loaded at boot, before the pad debounce is set and the library is scanned, and written whole to `config.ini.tmp`, then renamed over the old file (libfat can't rename over a file, so the old one is removed first). `VisualOffset`, `ScrollSpeed` and `LaneMap` come when something uses them (step 4 for scroll speed).
@@ -297,7 +310,7 @@ The logical canvas is 640 px wide. Four lanes at 64 px are 256 px, so:
 
 ### 11.4 Rules
 
-- The song keeps playing until it ends or **every** player has failed. A failed player's playfield greys out and stops judging. A per-player "no fail" option is planned with the rest of the options.
+- The song keeps playing until it ends or **every** player has failed. A failed player's playfield greys out and stops judging. A per-player "no fail" option is planned with the rest of the options. **Built (M5 step 4, Competitive only):** a failed player's playfield greys out with "FAILED", and their % stays where it was. When every player has failed, the song ends 1.5 s later. The results show "FAILED" and the % in red.
 - Results show every player side by side. High scores are still keyed by `songHash + difficulty`. Player names or profiles come later (a three-letter entry on the results screen is enough at first).
 - Assist clap and other SFX play once per row, not once per player.
 

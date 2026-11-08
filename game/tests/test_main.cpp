@@ -42,6 +42,7 @@
 #include "../source/core/songs/SongLibrary.h"
 #include "../source/core/config/Config.h"
 #include "../source/core/game/Calibration.h"
+#include "../source/core/game/LifeMeter.h"
 
 using namespace ddr;
 
@@ -801,6 +802,103 @@ static ddr::Note JNote(int row, double time, int lane, double end_time = -1) {
   return n;
 }
 
+static ddr::Note JMine(int row, double time, int lane) {
+  ddr::Note n = JNote(row, time, lane);
+  n.type = ddr::NoteType::Mine;
+  return n;
+}
+
+static ddr::Note JRoll(int row, double time, int lane, double end_time) {
+  ddr::Note n = JNote(row, time, lane, end_time);
+  n.type = ddr::NoteType::RollHead;
+  return n;
+}
+
+// Mines, rolls and the life meter (M5 step 4).
+static void TestMinesRollsLife() {
+  std::printf("[unit] mines, rolls, life\n");
+  using game::Judge;
+  {  // Mines: down as it passes = hit; pressed within 70 ms = hit; else avoided.
+    Judge j;
+    j.load({JMine(0, 1.0, 0), JMine(48, 2.0, 1), JMine(96, 3.0, 2), JMine(144, 4.0, 3)}, 4);
+    j.press(0, 0.9);    // lane 0 held across 1.0
+    j.release(0, 1.1);
+    j.press(1, 2.05);   // 50 ms after the mine
+    j.release(1, 2.1);
+    j.press(2, 3.2);    // 200 ms after: too late to hit it
+    j.release(2, 3.25);
+    j.press(3, 3.80);   // tapped and let go before it
+    j.release(3, 3.85);
+    j.update(10);
+    CHECK(j.score().mines_hit == 2 && j.score().mines_avoided == 2);
+    CHECK(j.mines()[0].state == Judge::MineState::kHit && j.mines()[2].state == Judge::MineState::kAvoided);
+    int ev = 0;
+    for (const game::JudgeEvent& e : j.events()) ev += e.kind == game::JudgeEvent::kMine;
+    CHECK(ev == 2 && j.finished());
+  }
+  {  // Rolls: holding isn't enough; re-presses within 0.35 s keep it.
+    Judge held, tapped, slow;
+    for (Judge* j : {&held, &tapped, &slow}) j->load({JRoll(0, 1.0, 0, 2.0)}, 4);
+    held.press(0, 1.0);
+    held.update(3);
+    CHECK(held.score().holds_let_go == 1);
+    for (double t = 1.0; t < 2.0; t += 0.3) { tapped.press(0, t); tapped.release(0, t + 0.05); }
+    tapped.update(3);
+    CHECK(tapped.score().holds_held == 1);
+    slow.press(0, 1.0); slow.release(0, 1.05);
+    slow.press(0, 1.4); slow.release(0, 1.45);   // 0.4 s gap
+    slow.update(3);
+    CHECK(slow.score().holds_let_go == 1);
+  }
+  {  // Autoplay avoids a mine right after a tap and taps through a roll.
+    Judge j;
+    j.load({JNote(0, 1.0, 0), JMine(6, 1.125, 0), JRoll(48, 2.0, 1, 3.0)}, 4);
+    for (const game::AutoStep& s : game::MakeAutoplay(j)) {
+      if (s.pressed) j.press(s.lane, s.time); else j.release(s.lane, s.time);
+    }
+    j.update(10);
+    CHECK(j.score().mines_hit == 0 && j.score().holds_held == 1);
+    CHECK(j.score().rows[(int)game::Grade::Marvelous] == 2);
+  }
+  {  // Life: ITG values from 0.5.
+    game::LifeMeter l;
+    CHECK_NEAR(l.life(), 0.5, 1e-12);
+    l.row(game::Grade::Marvelous);
+    CHECK_NEAR(l.life(), 0.508, 1e-12);
+    l.row(game::Grade::Miss);              // -0.1, then 5 good rows before gains count
+    CHECK_NEAR(l.life(), 0.408, 1e-12);
+    for (int i = 0; i < 4; i++) l.row(game::Grade::Marvelous);
+    CHECK_NEAR(l.life(), 0.408, 1e-12);
+    l.row(game::Grade::Marvelous);
+    CHECK_NEAR(l.life(), 0.416, 1e-12);
+    l.mine();
+    CHECK_NEAR(l.life(), 0.366, 1e-12);
+    l.hold(game::HoldResult::LetGo, game::Grade::Perfect);
+    CHECK_NEAR(l.life(), 0.286, 1e-12);
+    l.hold(game::HoldResult::LetGo, game::Grade::Miss);   // missed head: the Miss row counted
+    CHECK_NEAR(l.life(), 0.286, 1e-12);
+    CHECK(!l.danger());
+    for (int i = 0; i < 3; i++) l.row(game::Grade::Miss);
+    CHECK(l.failed() && l.life() == 0);
+    for (int i = 0; i < 50; i++) l.row(game::Grade::Marvelous);
+    CHECK(l.failed() && l.life() == 0);   // stays failed
+  }
+  {  // Full life: any loss costs at least 10% (harsh hot penalty); regen stacks to 10.
+    game::LifeMeter l;
+    for (int i = 0; i < 100; i++) l.row(game::Grade::Perfect);
+    CHECK(l.hot());
+    l.row(game::Grade::Boo);
+    CHECK_NEAR(l.life(), 0.9, 1e-12);
+    l.row(game::Grade::Boo);
+    l.row(game::Grade::Boo);               // 0.9 - 0.05 - 0.05; regen 10 rows
+    CHECK_NEAR(l.life(), 0.8, 1e-12);
+    for (int i = 0; i < 9; i++) l.row(game::Grade::Marvelous);
+    CHECK_NEAR(l.life(), 0.8, 1e-12);
+    l.row(game::Grade::Marvelous);
+    CHECK_NEAR(l.life(), 0.808, 1e-12);
+  }
+}
+
 static void TestJudge() {
   std::printf("[unit] Judge\n");
   using game::Grade;
@@ -942,7 +1040,7 @@ static void TestJudge() {
 static void TestAutoplayCorpus(const std::string& dir) {
   std::vector<std::string> index;
   if (!ReadLines(dir + "/expected/index.txt", index)) return;
-  size_t charts = 0, notes = 0, holds = 0, perfect = 0;
+  size_t charts = 0, notes = 0, holds = 0, perfect = 0, mines = 0;
   for (const std::string& rel : index) {
     if (rel.empty() || rel[0] == '#') continue;
     Song song;
@@ -961,16 +1059,18 @@ static void TestAutoplayCorpus(const std::string& dir) {
       const game::Score& sc = j.score();
       int rows = 0;
       for (int g = 0; g < game::kNumGrades; ++g) rows += sc.rows[g];
+      mines += j.mines().size();
       const bool ok = j.finished() && rows == sc.rows[(int)game::Grade::Marvelous] &&
                       sc.holds_let_go == 0 && sc.max_combo == rows && sc.held_misses == 0 &&
+                      sc.mines_hit == 0 &&
                       (sc.possible_points == 0 || sc.percent() == 100.0);
       ++g_checks;
       if (!ok) {
         ++g_failures;
         std::printf("  FAIL autoplay %s chart %zu: %d rows, %d Marvelous, %d let go, "
-                    "combo %d, %.2f%%\n", rel.c_str(), ci, rows,
+                    "combo %d, %.2f%%, %d mines hit\n", rel.c_str(), ci, rows,
                     sc.rows[(int)game::Grade::Marvelous], sc.holds_let_go, sc.max_combo,
-                    sc.percent());
+                    sc.percent(), sc.mines_hit);
       } else {
         ++perfect;
       }
@@ -979,8 +1079,8 @@ static void TestAutoplayCorpus(const std::string& dir) {
       holds += sc.holds_held + sc.holds_let_go;
     }
   }
-  std::printf("[autoplay] %zu/%zu charts 100%% Marvelous, %zu notes, %zu holds\n", perfect,
-              charts, notes, holds);
+  std::printf("[autoplay] %zu/%zu charts 100%% Marvelous, %zu notes, %zu holds, %zu mines avoided\n",
+              perfect, charts, notes, holds, mines);
 }
 
 // The M4c test song (tools/make-test-song.py): every note must sit exactly on the click
@@ -1067,7 +1167,10 @@ static void TestConfig(const std::string& dir) {
   std::printf("[unit] config.ini\n");
   Config c;
   ParseConfig("[Options]\r\nGlobalOffset= -12.5 \r\nDefaultSyncOffset=itg\r\nInputDebounceMs=10\r\n"
-              "[Port2]\r\nInputOffset=4\r\n", c);
+              "PlayMode=competitive\r\n[Port2]\r\nInputOffset=4\r\nScrollSpeed=3.3\r\n", c);
+  CHECK(c.playMode == PlayMode::Competitive);
+  CHECK_NEAR(c.ports[1].scrollSpeed, 3.25, 1e-12);   // rounded to 0.25
+  CHECK_NEAR(c.ports[0].scrollSpeed, 2.0, 1e-12);
   CHECK_NEAR(c.globalOffsetS, -0.0125, 1e-12);
   CHECK(c.defaultSyncOffset == DefaultSyncOffset::ITG);
   CHECK(c.inputDebounceMs == 10);
@@ -1088,6 +1191,8 @@ static void TestConfig(const std::string& dir) {
   CHECK_NEAR(e.globalOffsetS, c.globalOffsetS, 1e-9);
   CHECK(e.defaultSyncOffset == c.defaultSyncOffset && e.inputDebounceMs == c.inputDebounceMs);
   CHECK_NEAR(e.ports[1].inputOffsetS, 0.004, 1e-9);
+  CHECK(e.playMode == PlayMode::Competitive);
+  CHECK_NEAR(e.ports[1].scrollSpeed, 3.25, 1e-9);
 
   // Save twice over the same file (the second rename replaces the first file), then load.
   const std::string path = dir + "/build/config-test.ini";
@@ -1152,6 +1257,7 @@ int main(int argc, char** argv) {
   TestWavFile();
   TestSongClock();
   TestJudge();
+  TestMinesRollsLife();
   TestAutoplayCorpus(dir);
   TestTestSong(dir);
   TestSongLibrary(dir);

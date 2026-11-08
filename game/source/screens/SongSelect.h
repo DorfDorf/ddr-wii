@@ -8,8 +8,9 @@
 // placeholder graphics and bitmap font; no theme files are used.
 //
 // Controls, as on a dance mat in ITG: Left/Right move the wheel (held: repeat), Up/Down change
-// that player's difficulty, START opens a pack or picks the song. START on a port that hasn't
-// joined joins it as the next player. Debug: Z toggles that player's autoplay, X leaves,
+// that player's difficulty (with A held: their scroll speed), START opens a pack or picks the
+// song, B goes back to the play-mode screen. START on a port that hasn't joined joins it as
+// the next player. Debug: Z toggles that player's autoplay, X leaves,
 // Y on port 1 adds/removes an autoplay player, R on port 1 opens the offset calibration.
 #pragma once
 
@@ -29,10 +30,12 @@ public:
     SongSelect(wii::Video& video, const wii::Input& input, const render::Font& font, Session& session);
 
     // One frame of logic + drawing. Returns false when a song was picked (picked()), the
-    // calibration screen was asked for (calibrate()) or the exit chord (START+Z for 2 s) held.
+    // calibration screen was asked for (calibrate()), B went back (back()) or the exit chord
+    // (START+Z for 2 s) was held.
     bool frame();
     bool picked() const { return picked_; }
     bool calibrate() const { return calibrate_; }
+    bool back() const { return back_; }
 
 private:
     struct Item { int pack, song; };   // song -1: the pack's header
@@ -61,6 +64,7 @@ private:
     u32 quit_frames_ = 0;
     bool picked_ = false;
     bool calibrate_ = false;
+    bool back_ = false;
 };
 
 }  // namespace screens

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// ddr-wii entry point. Scans the song library, then boots into song select, which hands the
-// picked song to gameplay and gets it back after the results (M5 step 2). B on port 1 in song
-// select cycles through the M4b audio clock test, the M2b playfield stress test and the M2
-// render test, and back to song select.
+// ddr-wii entry point. Loads config.ini, scans the song library, then boots into the play-mode
+// screen (Casual / Competitive), then song select, which hands the picked song to gameplay and
+// gets it back after the results. B in song select goes back to the mode screen; B on port 1
+// there cycles through the M4b audio clock test, the M2b playfield stress test and the M2
+// render test, and back.
 #include <fat.h>
 #include <gccore.h>
 #include <ogc/lwp_watchdog.h>
@@ -15,6 +16,7 @@
 #include "screens/AudioClockTest.h"
 #include "screens/Gameplay.h"
 #include "screens/OffsetCalibration.h"
+#include "screens/PlayModeSelect.h"
 #include "screens/PlayfieldStress.h"
 #include "screens/RenderTest.h"
 #include "screens/Session.h"
@@ -36,6 +38,14 @@ bool runScene(wii::Video& video, wii::Input& input, Scene& scene, bool b_next = 
         video.endFrame();
         if (!running) return false;
     }
+}
+
+// Writes config.ini if a screen changed it (play mode, scroll speeds).
+void saveConfigIfChanged(screens::Session& session) {
+    if (!session.config_dirty) return;
+    session.config_dirty = false;
+    if (!ddr::SaveConfig(screens::OffsetCalibration::kConfigPath, session.config))
+        session.message = "Couldn't write sd:/ddrwii/config.ini";
 }
 
 }  // namespace
@@ -63,16 +73,36 @@ int main(int, char**) {
     session.scan_us = ticks_to_microsecs(gettime()) - t0;
 
     int which = 0;
+    bool in_song_select = false;   // else the play-mode screen
     for (;;) {
         bool next;
-        if (which == 0) {
-            bool play, calibrate;
+        if (which == 0 && !in_song_select) {
+            bool chosen;
+            {
+                screens::PlayModeSelect scene(video, input, font, session);
+                next = runScene(video, input, scene);
+                chosen = !next && scene.chosen();
+            }
+            saveConfigIfChanged(session);
+            if (chosen) {
+                in_song_select = true;
+                continue;
+            }
+        } else if (which == 0) {
+            bool play, calibrate, back;
             {
                 screens::SongSelect scene(video, input, font, session);
-                next = runScene(video, input, scene);
-                play = !next && scene.picked();
-                calibrate = !next && scene.calibrate();
+                runScene(video, input, scene, false);
+                play = scene.picked();
+                calibrate = scene.calibrate();
+                back = scene.back();
             }
+            saveConfigIfChanged(session);
+            if (back) {
+                in_song_select = false;
+                continue;
+            }
+            if (!play && !calibrate) break;   // the exit chord
             if (calibrate) {
                 screens::OffsetCalibration cal(video, input, art, font, session);
                 runScene(video, input, cal, false);

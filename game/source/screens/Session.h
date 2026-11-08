@@ -20,6 +20,7 @@ struct SessionPlayer {
     bool autoplay = false;
     ddr::Difficulty preferred = ddr::Difficulty::Easy;    // kept from song to song, as in ITG
     int chart = 0;                                        // index into SongEntry::charts
+    double speed = 2.0;                                   // scroll speed (x-mod), from config.ini
 };
 
 struct Session {
@@ -36,6 +37,7 @@ struct Session {
     std::vector<SessionPlayer> players;     // player number = position (join order)
     ddr::Config config;                     // config.ini: global offset, per-port input offsets
     bool config_loaded = false;             // false: no config.ini yet (defaults)
+    bool config_dirty = false;              // changed since the last save (main.cpp saves it)
     std::string message;                    // one-line note for song select (e.g. "offset saved")
 
     const ddr::SongEntry* chosen() const {

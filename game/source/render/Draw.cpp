@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "render/Draw.h"
 
+#include <cmath>
+
 namespace render {
 namespace {
 
@@ -25,6 +27,9 @@ const DrawCounts& counts() { return g_counts; }
 
 void img(float x, float y, const GRRLIB_texImg* tex, float degrees, float sx, float sy, u32 colour) {
     if (!tex) return;
+    // A quad under a pixel tall or wide (a short hold body at its tail, scale ~0.005) made
+    // every textured draw vanish for a second or more in Dolphin (M5 step 4); skip it.
+    if (std::fabs(tex->w * sx) < 1.0f || std::fabs(tex->h * sy) < 1.0f) return;
     countTextured(tex, tex->w * sx, tex->h * sy);
     GRRLIB_DrawImg(x, y, tex, degrees, sx, sy, colour);
 }
