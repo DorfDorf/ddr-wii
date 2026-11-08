@@ -977,6 +977,30 @@ static void TestAutoplayCorpus(const std::string& dir) {
               charts, notes, holds);
 }
 
+// The M4c test song (tools/make-test-song.py): every note must sit exactly on the click
+// track's grid (beat k at k * 0.5 s), so a human's mean error there is pure latency.
+static void TestTestSong(const std::string& dir) {
+  std::printf("[unit] test song (tools/make-test-song.py)\n");
+  Song song;
+  CHECK(LoadSongFile(dir + "/corpus/synthetic/20_test_song.sm", song));
+  CHECK(song.music == "click120-44k.ogg");
+  CHECK(song.charts.size() == 3);
+  bool on_grid = true;
+  size_t holds = 0;
+  for (const Chart& c : song.charts) {
+    CHECK(!c.notes.empty() && c.notes.front().time == 4.0);   // measure 2
+    for (const Note& n : c.notes) {
+      if (std::fabs(n.time - n.beat * 0.5) > 1e-12) on_grid = false;
+      if (n.IsHold()) {
+        ++holds;
+        if (std::fabs(n.endTime - n.endBeat * 0.5) > 1e-12) on_grid = false;
+      }
+    }
+  }
+  CHECK(on_grid);
+  CHECK(holds == 32);   // 16 per chart in Easy and Medium
+}
+
 int main(int argc, char** argv) {
   std::string dir = ".";
   int fuzzIterations = 3000;
@@ -1000,6 +1024,7 @@ int main(int argc, char** argv) {
   TestSongClock();
   TestJudge();
   TestAutoplayCorpus(dir);
+  TestTestSong(dir);
   RunFuzz(dir, fuzzIterations);
 
   std::printf("\n%d checks, %d failures%s\n", g_checks, g_failures,

@@ -72,6 +72,7 @@ then `ddr_tests.exe .`
 | `synthetic/17` | stop and delay at beat 0 |
 | `synthetic/18` | split timing with warps, scrolls and speeds |
 | `synthetic/19` | `.sm` `#DELAYS`, Edit chart |
+| `synthetic/20` | the M4c test song from `tools/make-test-song.py` (not `gen_corpus.py`) |
 
 The synthetic files come from `corpus/gen_corpus.py` (seeded and committed).
 After changing the corpus, regenerate the oracle dumps and `expected/index.txt`:
