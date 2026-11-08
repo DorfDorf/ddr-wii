@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// ddr-wii entry point. Boots into the M4c gameplay scene; B on port 1 cycles through it,
-// the M4b audio clock test, the M2b playfield stress test and the M2 render test.
+// ddr-wii entry point. Scans the song library, then boots into song select, which hands the
+// picked song to gameplay and gets it back after the results (M5 step 2). B on port 1 in song
+// select cycles through the M4b audio clock test, the M2b playfield stress test and the M2
+// render test, and back to song select.
 #include <fat.h>
 #include <gccore.h>
+#include <ogc/lwp_watchdog.h>
 #include <stdlib.h>
 
 #include "platform/wii/WiiInput.h"
@@ -13,17 +16,21 @@
 #include "screens/Gameplay.h"
 #include "screens/PlayfieldStress.h"
 #include "screens/RenderTest.h"
+#include "screens/Session.h"
+#include "screens/SongSelect.h"
 
 namespace {
 
-// Runs one scene until it quits (returns false) or B is pressed (returns true).
+constexpr const char* kSongsRoot = "sd:/ddrwii/songs";
+
+// Runs one scene until it quits (returns false) or, with b_next, B is pressed (returns true).
 template <typename Scene>
-bool runScene(wii::Video& video, wii::Input& input, Scene& scene) {
+bool runScene(wii::Video& video, wii::Input& input, Scene& scene, bool b_next = true) {
     video.resetStats();
     for (;;) {
         video.beginFrame();
         input.update();   // drains the timestamped SI samples; scenes read input from here
-        if (input.down(0) & PAD_BUTTON_B) return true;
+        if (b_next && (input.down(0) & PAD_BUTTON_B)) return true;
         const bool running = scene.frame();
         video.endFrame();
         if (!running) return false;
@@ -45,14 +52,29 @@ int main(int, char**) {
         return EXIT_FAILURE;
     }
 
-    fatInitDefault();   // SD card (sd:/); the gameplay and audio scenes report it if this failed
+    fatInitDefault();   // SD card (sd:/); song select and the audio test report it if this failed
+
+    screens::Session session;
+    const u64 t0 = ticks_to_microsecs(gettime());
+    session.scanned = ddr::ScanSongLibrary(kSongsRoot, session.library);
+    session.scan_us = ticks_to_microsecs(gettime()) - t0;
 
     int which = 0;
     for (;;) {
         bool next;
         if (which == 0) {
-            screens::Gameplay scene(video, input, art, font);
-            next = runScene(video, input, scene);
+            bool play;
+            {
+                screens::SongSelect scene(video, input, font, session);
+                next = runScene(video, input, scene);
+                play = !next && scene.picked();
+            }
+            if (play) {
+                screens::Gameplay game(video, input, art, font, session);
+                runScene(video, input, game, false);
+                if (game.quitApp()) break;
+                continue;   // back to song select
+            }
         } else if (which == 1) {
             screens::AudioClockTest scene(video, input, font);
             next = runScene(video, input, scene);

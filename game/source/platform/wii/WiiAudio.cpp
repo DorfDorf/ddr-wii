@@ -41,6 +41,41 @@ volatile u32 g_ring_min = N;
 
 // ---- Sources: something that produces 16-bit PCM frames ----
 
+// OGG and MP3 files are read whole into one fixed buffer at the top of MEM2, reserved the
+// first time it's needed and reused for every song (doc 05 M4c open item 5): no multi-MB
+// malloc/free per song, so repeated song loads can't fragment the heap. One file at a time.
+constexpr u32 kFileBufBytes = 24u << 20;
+u8* g_file_buf = nullptr;
+
+// Reads all of f (and closes it) into the file buffer, followed by `guard` zero bytes.
+const char* readWhole(FILE* f, u8*& data, size_t& size, size_t guard) {
+    if (!g_file_buf) {
+        const u32 lo = (u32)SYS_GetArena2Lo(), hi = (u32)SYS_GetArena2Hi();
+        const u32 p = (hi - kFileBufBytes) & ~31u;
+        if (hi > kFileBufBytes && p >= lo) {
+            SYS_SetArena2Hi((void*)p);
+            g_file_buf = (u8*)p;
+        }
+    }
+    fseek(f, 0, SEEK_END);
+    const long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    const char* err = nullptr;
+    if (!g_file_buf) {
+        err = "no MEM2 for the song buffer";
+    } else if (len <= 0 || (u32)len + guard > kFileBufBytes) {
+        err = len <= 0 ? "empty file" : "file bigger than the 24 MB song buffer";
+    } else if (fread(g_file_buf, 1, len, f) != (size_t)len) {
+        err = "SD read failed";
+    } else {
+        memset(g_file_buf + len, 0, guard);
+        data = g_file_buf;
+        size = len;
+    }
+    fclose(f);
+    return err;
+}
+
 struct Source {
     u32 rate = 0;
     int channels = 0;
@@ -114,17 +149,9 @@ struct OggSource : Source {
 
     ~OggSource() override {
         if (vf_open) ov_clear(&vf);
-        free(data);
     }
     const char* open(FILE* f) {
-        fseek(f, 0, SEEK_END);
-        const long len = ftell(f);
-        fseek(f, 0, SEEK_SET);
-        data = len > 0 ? (u8*)malloc(len) : nullptr;
-        const bool ok = data && fread(data, 1, len, f) == (size_t)len;
-        fclose(f);
-        if (!ok) return data ? "SD read failed" : "out of memory";
-        size = len;
+        if (const char* err = readWhole(f, data, size, 0)) return err;
         const ov_callbacks cb = {cbRead, cbSeek, nullptr, cbTell};
         if (ov_open_callbacks(this, &vf, nullptr, 0, cb) != 0) return "not an OGG Vorbis file";
         vf_open = true;
@@ -199,18 +226,10 @@ struct Mp3Source : Source {
             mad_frame_finish(&frame);
             mad_stream_finish(&stream);
         }
-        free(data);
     }
     const char* open(FILE* f) {
-        fseek(f, 0, SEEK_END);
-        const long len = ftell(f);
-        fseek(f, 0, SEEK_SET);
         // libmad needs MAD_BUFFER_GUARD zero bytes after the data to decode the last frame.
-        data = len > 0 ? (u8*)calloc(len + MAD_BUFFER_GUARD, 1) : nullptr;
-        const bool ok = data && fread(data, 1, len, f) == (size_t)len;
-        fclose(f);
-        if (!ok) return data ? "SD read failed" : "out of memory";
-        size = len;
+        if (const char* err = readWhole(f, data, size, MAD_BUFFER_GUARD)) return err;
 
         // Scan the frame headers once: rate, channels, length and the Xing/Info tag.
         mad_stream s;

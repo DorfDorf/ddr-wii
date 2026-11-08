@@ -189,7 +189,7 @@ Boot ─► Title ─► SongSelect ─► DifficultySelect ─► Gameplay ─�
 Options (scroll speed, global offset, calibration) reachable from Title.
 ```
 
-- **SongSelect:** a list from `SongLibrary` (scans `sd:/ddrwii/songs/*/*/`), sorted by pack then title. If a pack has a `pack.ini` (ITGmania's format: a `[Group]` section with `DisplayTitle`, `SortTitle`, `Series`, `Banner`, `Year`, `SyncOffset`), use its display title, sort title and banner, and apply its `SyncOffset` (§3.2). Ported from ITGmania's `Group.cpp`. Arrows move, Start chooses, B/Z backs out. Preview audio plays after a 0.5 s pause on an entry.
+- **SongSelect:** a list from `SongLibrary` (scans `sd:/ddrwii/songs/*/*/`), sorted by pack then title. If a pack has a `pack.ini` (ITGmania's format: a `[Group]` section with `DisplayTitle`, `SortTitle`, `Series`, `Banner`, `Year`, `SyncOffset`), use its display title, sort title and banner, and apply its `SyncOffset` (§3.2). Ported from ITGmania's `Group.cpp`. Preview audio plays after a 0.5 s pause on an entry. **Built (M5 step 2):** `screens/SongSelect`. Its layout follows ITGmania's default theme, Simply Love (GPLv3), in 4:3: banner top left (a title placeholder until step 6), artist/BPM/length box, a difficulty grid with the meter in the difficulty's colour and ten meter blocks, one pane per player along the bottom with the chart's steps/jumps/holds/mines/rolls, and the music wheel on the right (pack headers, the open pack's songs under its header). It's redrawn with our own rects and bitmap font; no theme files are used. Colours are Simply Love's (its default colour index). Controls follow ITG on a mat: Left/Right move the wheel (held: repeat after 0.4 s), Up/Down change that player's difficulty, START opens/closes a pack or picks the song. Each player's difficulty is remembered from song to song (nearest chart if the song lacks it). Debug: Z toggles that player's autoplay, X leaves, Y on port 1 adds/removes an autoplay player, L/R on port 1 set the global offset in 5 ms steps (until `config.ini`, step 3), B on port 1 goes to the test scenes. START+Z for 2 s exits.
 - **SongLibrary cache:** parsing headers for hundreds of songs from SD is slow, so cache `{path, mtime, title, artist, bpm range, difficulties}` in `sd:/ddrwii/cache.bin` **[exp: measure the scan time]**.
 - **Scoring (prototype):** "dance points" percentage, as in StepMania/ITG (Marvelous/Perfect = 100%, Great = 50%, Good/Boo/Miss = 0, holds OK = full credit) plus max combo and judgement counts. DDR-style money score can be added later (SM 3.9 `ScoreKeeperMAX2.cpp` as reference).
 - **High scores:** `scores.dat` is a small versioned binary or INI keyed by `songHash + difficulty`, storing the best percentage, combo and grade. It's written atomically (write a temp file, then rename).
@@ -227,7 +227,8 @@ ddr-wii/
 │   │   │                         #   (later) WiiInput.*  WiiAudio.*  WiiFs.*  WiiSystem.*
 │   │   ├── render/               # GRRLIB drawing: ArrowArt.*  Font.*  Draw.*
 │   │   └── screens/  PlayfieldStress.*  RenderTest.*
-│   │                 (later) Title.*  SongSelect.*  Gameplay.*  Results.*  Options.*
+│   │                 Session.h  SongSelect.*  Gameplay.* (with results)
+│   │                 (later) Title.*  Options.*
 │   ├── data/                     # (later) small embedded assets (font, arrow atlas) → linked in
 │   └── tests/                    # host-side tests for core/ (built with g++ on the PC)
 └── sd/                           # staging copy of the SD card layout (doc 03 §6.3)
@@ -273,7 +274,7 @@ Memory cost is small: a chart is a few thousand notes, so four of them are tens 
 - **Joining:** on the title screen and song select, pressing Start on a port joins it as the next player, DDR style. Leaving goes through B/Z on that port before the song starts. The player number follows join order, not the port number, so one mat in port 3 is still P1.
 - **Menus:** any joined player can move the song wheel. Difficulty and scroll speed are chosen per player on the difficulty screen, with each player's cursor in their own column. The song starts when every joined player has confirmed.
 - **Pause:** Start on any joined port pauses for everyone.
-- **For now (M4c):** the gameplay scene's ready screen does the joining. START on port 2 adds a human P2, and Y on port 1 adds an autoplay P2 for testing with one pad or the keyboard. START during a song stops it (there's no pause yet).
+- **Built (M5 step 2):** song select does the joining (there's no title screen yet), and nobody is joined until someone presses START. Leaving is X for now (B on port 1 still opens the test scenes). Y on port 1 adds an autoplay player on a free port for testing with one pad or the keyboard; START on that port turns it into a human player. The players go to Gameplay in a `Session`, in join order. START during a song stops it and shows the results (there's no pause yet).
 
 ### 11.3 Playfield layout
 

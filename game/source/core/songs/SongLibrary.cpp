@@ -77,6 +77,41 @@ std::string PickBanner(const Song& song, const std::vector<std::string>& files) 
   return std::string();
 }
 
+void CountNotes(const Chart& c, ChartInfo& ci) {
+  int lastRow = -1, onRow = 0;
+  auto endRow = [&]() {
+    if (onRow > 0) ci.steps++;
+    if (onRow > 1) ci.jumps++;
+  };
+  for (const Note& n : c.notes) {
+    if (!n.judgable) continue;
+    if (n.type == NoteType::Mine) { ci.mines++; continue; }
+    if (n.type != NoteType::Tap && !n.IsHold()) continue;
+    if (n.type == NoteType::HoldHead) ci.holds++;
+    if (n.type == NoteType::RollHead) ci.rolls++;
+    if (n.row != lastRow) { endRow(); onRow = 0; lastRow = n.row; }
+    onRow++;
+  }
+  endRow();
+}
+
+void BpmRange(const Song& song, SongEntry& s) {
+  if (song.displayBpmRandom) { s.bpmRandom = true; return; }
+  if (song.displayBpmSpecified) {
+    s.bpmMin = song.displayBpmMin;
+    s.bpmMax = song.displayBpmMax;
+    return;
+  }
+  bool first = true;
+  for (const TimingSegment& seg : song.timing.GetTimingSegments(SEGMENT_BPM)) {
+    const double bpm = seg.value * 60.0;
+    if (bpm <= 0) continue;
+    if (first || bpm < s.bpmMin) s.bpmMin = bpm;
+    if (first || bpm > s.bpmMax) s.bpmMax = bpm;
+    first = false;
+  }
+}
+
 std::string SortKey(const std::string& s) { return Lower(Trimmed(s)); }
 
 std::string WithSlash(std::string s) {
@@ -165,6 +200,8 @@ bool ScanSongLibrary(const std::string& rootIn, SongLibrary& out, DefaultSyncOff
         ci.difficulty = c.difficulty;
         ci.meter = c.meter;
         ci.description = c.description;
+        CountNotes(c, ci);
+        for (const Note& n : c.notes) s.lengthSeconds = std::max(s.lengthSeconds, n.IsHold() ? n.endTime : n.time);
         s.charts.push_back(ci);
       }
       if (s.charts.empty()) {
@@ -187,6 +224,7 @@ bool ScanSongLibrary(const std::string& rootIn, SongLibrary& out, DefaultSyncOff
       s.subtitleTranslit = song.subtitleTranslit;
       s.sampleStart = song.sampleStart;
       s.sampleLength = song.sampleLength;
+      BpmRange(song, s);
       pack.songs.push_back(std::move(s));
     }
     if (pack.songs.empty()) continue;

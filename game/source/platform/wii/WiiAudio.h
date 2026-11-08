@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // WiiAudio - play a song file from the SD card through ASND voice 0 (doc 06 §4, M4b).
 //   .wav  16-bit PCM, streamed from the SD card
-//   .ogg  Vorbis, read into memory first, decoded with Tremor
-//   .mp3  read into memory first, decoded with libmad the way ITGmania does (no gapless trim)
+//   .ogg  Vorbis, read into a fixed 24 MB MEM2 buffer first, decoded with Tremor
+//   .mp3  read into the same buffer first, decoded with libmad the way ITGmania does (no gapless trim)
 //
 // A fill thread reads or decodes the file into a ring of kChunks buffers. The ASND voice
 // callback (interrupt level, once per 21.3 ms mixing tick while ASND's second slot is empty)
