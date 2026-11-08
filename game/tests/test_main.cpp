@@ -907,12 +907,18 @@ static void TestJudge() {
   using game::Judge;
   const game::Windows w;
   CHECK(game::GradeForError(0.0, w) == Grade::Marvelous);
-  CHECK(game::GradeForError(0.0225, w) == Grade::Marvelous);
-  CHECK(game::GradeForError(0.0226, w) == Grade::Perfect);
-  CHECK(game::GradeForError(0.090, w) == Grade::Great);
-  CHECK(game::GradeForError(0.135, w) == Grade::Good);
-  CHECK(game::GradeForError(0.180, w) == Grade::Boo);
-  CHECK(game::GradeForError(0.181, w) == Grade::None);
+  // ITG's windows (Simply Love ITG mode + 1.5 ms).
+  CHECK(game::GradeForError(0.0230, w) == Grade::Marvelous);
+  CHECK(game::GradeForError(0.0231, w) == Grade::Perfect);
+  CHECK(game::GradeForError(0.0445, w) == Grade::Perfect);
+  CHECK(game::GradeForError(0.0446, w) == Grade::Great);
+  CHECK(game::GradeForError(0.095, w) == Grade::Great);    // a Good with StepMania's windows
+  CHECK(game::GradeForError(0.1035, w) == Grade::Great);
+  CHECK(game::GradeForError(0.1036, w) == Grade::Good);
+  CHECK(game::GradeForError(0.1365, w) == Grade::Good);
+  CHECK(game::GradeForError(0.1366, w) == Grade::Boo);
+  CHECK(game::GradeForError(0.1815, w) == Grade::Boo);
+  CHECK(game::GradeForError(0.1816, w) == Grade::None);
 
   {  // Closest note: a press between two close notes takes the nearer, the other misses.
     Judge j;
@@ -990,9 +996,9 @@ static void TestJudge() {
     j.release(0, 1.5);
     j.press(0, 1.7);    // released for 0.2 s: still OK
     j.release(1, 2.0);  // released for good
-    j.update(2.24);
+    j.update(2.32);     // the hold window is 0.3215 s
     CHECK(j.notes()[1].hold_result == HoldResult::None);
-    j.update(2.26);
+    j.update(2.33);
     CHECK(j.notes()[1].hold_result == HoldResult::LetGo);
     CHECK(j.notes()[2].hold_result == HoldResult::LetGo);   // head missed
     CHECK(!j.finished());

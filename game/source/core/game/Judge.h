@@ -41,16 +41,18 @@ inline bool Worse(Grade a, Grade b) { return static_cast<int>(a) > static_cast<i
 
 enum class HoldResult : uint8_t { None, Held, LetGo };
 
-// ± seconds from the note (StepMania defaults, doc 06 §3.4).
+// ± seconds from the note (doc 06 §3.4).
+// ITG's windows: Simply Love's ITG mode (Scripts/SL_Init.lua TimingWindowSeconds*) plus
+// TimingWindowAdd 0.0015, which ITGmania's Player::GetWindowSeconds adds to every window.
 struct Windows {
-  double marvelous = 0.0225;
-  double perfect = 0.045;
-  double great = 0.090;
-  double good = 0.135;
-  double boo = 0.180;
-  double hold_ok = 0.250;   // longest release allowed during a hold
-  double roll_ok = 0.350;   // longest gap between presses during a roll (ITG)
-  double mine = 0.070;      // a press this close to a mine hits it (ITG)
+  double marvelous = 0.0230;   // Fantastic  0.0215 + 0.0015
+  double perfect = 0.0445;     // Excellent  0.0430 + 0.0015
+  double great = 0.1035;       // Great      0.1020 + 0.0015
+  double good = 0.1365;        // Decent     0.1350 + 0.0015
+  double boo = 0.1815;         // Way Off    0.1800 + 0.0015
+  double hold_ok = 0.3215;     // longest release allowed during a hold (0.320 + 0.0015)
+  double roll_ok = 0.3515;     // longest gap between presses during a roll (0.350 + 0.0015)
+  double mine = 0.0715;        // a press this close to a mine hits it (0.070 + 0.0015)
 };
 
 // The grade for an error of abs_seconds, or None when it's outside the Boo window.
