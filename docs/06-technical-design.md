@@ -194,36 +194,40 @@ Options (scroll speed, global offset, calibration) reachable from Title.
 - **Exit:** return from `main()` or call `exit(0)` to go back to HBC/Dolphin.
 - Memory: allocate large buffers (audio file, ring, textures) from MEM2 where possible. Watch the heap usage display in the debug overlay.
 
-## 9. Initial repository structure
+## 9. Repository structure
 
 ```
 ddr-wii/
+├── CLAUDE.md                     # notes for Claude: commands, code rules, key decisions
 ├── docs/                         # these documents
-├── reference/                    # supplied archives + extracted copies (read-only, not modified)
+├── reference/                    # supplied archives + extracted copies (local only, read-only, not in git)
 ├── tools/
-│   ├── padtest/                  # M1/M3: diagnostic from doc 04 (own Makefile)
-│   ├── deploy-dolphin.sh         # copy boot.dol + sd/ to Dolphin's WiiSDSync, launch Dolphin -e
-│   └── simfile-oracle.py         # dumps beat→time tables via `simfile` for unit tests
+│   ├── padtest/                  # M1/M3: pad diagnostic from doc 04 (own Makefile)
+│   ├── run-dolphin.sh            # boot a .dol in Dolphin (used by `make run-dolphin`)
+│   ├── setup-devkitpro.sh        # one-time toolchain + GRRLIB setup (doc 03)
+│   └── simfile-oracle.py         # dumps beat→time tables via `simfile` for the tests
 ├── game/
 │   ├── Makefile                  # based on devkitPro wii-examples/templates/makefile
 │   ├── source/
 │   │   ├── main.cpp
 │   │   ├── core/                 # portable C++17, no libogc includes
-│   │   │   ├── chart/  MsdParser.*  SmLoader.*  SscLoader.*  Chart.h
-│   │   │   ├── timing/ TimingData.*  SongClock.h (interface)
-│   │   │   ├── judge/  Judge.*  Score.*
-│   │   │   └── songs/  SongLibrary.*  HighScores.*  Config.*
-│   │   ├── platform/wii/         # libogc / GRRLIB implementations
-│   │   │   ├── WiiInput.*  WiiAudio.*  WiiVideo.*  WiiFs.*  WiiSystem.*
-│   │   └── screens/  Title.*  SongSelect.*  Gameplay.*  Results.*  Options.*
-│   ├── data/                     # small embedded assets (font, arrow atlas) → linked in
-│   └── tests/                    # host-side unit tests for core/ (build with g++/MSVC on PC)
+│   │   │   ├── chart/  MsdFile.*  SmLoader.*  SscLoader.*  NoteData.*  Chart.*  PackIni.*  StringUtil.*
+│   │   │   ├── timing/ TimingData.*  (later) SongClock.h (interface)
+│   │   │   ├── judge/  (later) Judge.*  Score.*
+│   │   │   └── songs/  (later) SongLibrary.*  HighScores.*  Config.*
+│   │   ├── platform/wii/         # libogc / GRRLIB wrappers: WiiVideo.*
+│   │   │                         #   (later) WiiInput.*  WiiAudio.*  WiiFs.*  WiiSystem.*
+│   │   ├── render/               # GRRLIB drawing: ArrowArt.*  Font.*  Draw.*
+│   │   └── screens/  PlayfieldStress.*  RenderTest.*
+│   │                 (later) Title.*  SongSelect.*  Gameplay.*  Results.*  Options.*
+│   ├── data/                     # (later) small embedded assets (font, arrow atlas) → linked in
+│   └── tests/                    # host-side tests for core/ (built with g++ on the PC)
 └── sd/                           # staging copy of the SD card layout (doc 03 §6.3)
     ├── apps/ddrwii/{boot.dol,meta.xml,icon.png}
     └── ddrwii/songs/<Pack>/<Song>/...
 ```
 
-The `core/` code has no dependency on libogc, so `game/tests/` can compile it with your PC compiler, and parser and timing bugs can be found in seconds without Dolphin.
+Entries marked (later) are planned and don't exist yet. The `core/` code has no dependency on libogc, so `game/tests/` can compile it with your PC compiler, and parser and timing bugs can be found in seconds without Dolphin.
 
 ## 10. Design decisions driven by the Wii hardware
 

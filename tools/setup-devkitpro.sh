@@ -24,13 +24,14 @@ $PAC -S git make
 
 echo "== GRRLIB (docs/03 §2) =="
 GRRLIB_DIR="${GRRLIB_DIR:-$HOME/GRRLIB}"
-GRRLIB_REF="${GRRLIB_REF:-master}"
+# Pinned to the version this project is built with: v4.6.1 + 9 commits (2026-10-12).
+GRRLIB_REF="${GRRLIB_REF:-a426e6170cbd9a4a69851a705637d753a09f8294}"
 if [ ! -d "$GRRLIB_DIR/.git" ]; then
     git clone https://github.com/GRRLIB/GRRLIB.git "$GRRLIB_DIR"
 fi
 git -C "$GRRLIB_DIR" fetch --tags origin
 git -C "$GRRLIB_DIR" checkout "$GRRLIB_REF"
-git -C "$GRRLIB_DIR" pull --ff-only || true   # no-op when GRRLIB_REF is a tag
+git -C "$GRRLIB_DIR" pull --ff-only 2>/dev/null || true   # only matters when GRRLIB_REF is a branch
 make -C "$GRRLIB_DIR/GRRLIB" clean all install   # the Makefile lives in the inner GRRLIB/ folder
 echo "GRRLIB at $(git -C "$GRRLIB_DIR" describe --tags --always)"
 
