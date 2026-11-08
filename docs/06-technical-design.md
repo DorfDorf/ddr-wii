@@ -146,6 +146,10 @@ Bugs in StepMania-Wii's driver that we shouldn't copy (its author reports it cra
 - clipped song endings: `StopPlaying()` from the fill thread on a short read (`:49`), and full 8 KB buffers queued even when partly filled (`:33`)
 - no synchronisation between the IRQ callback and the fill thread
 
+How ASND behaves, from `libasnd/asndlib.c` **[src]**: it mixes in ticks of 1024 output samples at 48 kHz (21.3 ms), whatever the voice's rate. A voice callback is called at interrupt level on **every tick while the second buffer slot is empty**, not once. `ASND_TestPointer` checks both slots by base address. `ASND_GetTimerVoice`/`ASND_GetTickCounterVoice` count those ticks since `ASND_SetVoice`, so they step in 21.3 ms. `VOICE_STEREO_16BIT` is big-endian; WAV data uses `VOICE_STEREO_16BIT_LE`. Data the CPU wrote must be flushed (`DCFlushRange`) before the DSP reads it.
+
+The M4b implementation (`platform/wii/WiiAudio`): a ring of 16 buffers of 2048 frames; a fill thread polls every 4 ms and fills free buffers; the callback retires every buffer `ASND_TestPointer` no longer reports (adding its frames to "played" and timestamping that with `gettime()`), then queues the next ready buffer. `SongClock` (§3.1, `core/timing/SongClock`) moves its offset 1/64 of the way to each report, snaps on errors over 50 ms, never runs backwards, and stops 200 ms after the last report.
+
 Use `ASND_TestPointer()` / `ASND_TestVoiceBufferReady()` (`asndlib.h:354`, `:363`) so a buffer is never refilled while it is still playing.
 
 ## 5. Rendering

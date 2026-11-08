@@ -139,6 +139,13 @@ Our game reads songs from `sd:/`. In Dolphin **[mem — confirm the labels in yo
 2. Tick **Enable SD Card Folder Sync** (or a similarly named option). Dolphin builds its virtual `sd.raw` image from a normal Windows folder at boot and writes changes back when emulation stops. The default folder is `<Dolphin User>\Load\WiiSDSync\`.
 3. Put your SD layout there (see §6.3), e.g. `WiiSDSync\ddrwii\songs\...`.
 
+Without changing the settings, the same can be turned on per run from the command line (checked with Dolphin 2609a, 2026-11-08):
+
+```bash
+tools/stage-sd.sh "$(cygpath -u "$USERPROFILE")/Dolphin-x64/User/Load/WiiSDSync"
+make -C game run-dolphin DOLPHIN_ARGS='-C Dolphin.Core.WiiSDCard=True -C Dolphin.Core.WiiSDCardEnableFolderSync=True'
+```
+
 If your build doesn't have folder sync, the fallback is the `sd.raw` image in `<User>\Wii\sd.raw`, mounted with a FAT tool. Folder sync is much easier.
 
 ### 4.4 Map the keyboard to the "dance pad"

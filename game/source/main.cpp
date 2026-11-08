@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// ddr-wii entry point. Boots into the M2b playfield stress test; B on port 1 switches
-// to the M2 render test scene and back.
+// ddr-wii entry point. Boots into the M4b audio clock test; B on port 1 cycles through it,
+// the M2b playfield stress test and the M2 render test.
+#include <fat.h>
 #include <gccore.h>
 #include <stdlib.h>
 
@@ -8,6 +9,7 @@
 #include "platform/wii/WiiVideo.h"
 #include "render/ArrowArt.h"
 #include "render/Font.h"
+#include "screens/AudioClockTest.h"
 #include "screens/PlayfieldStress.h"
 #include "screens/RenderTest.h"
 
@@ -42,10 +44,15 @@ int main(int, char**) {
         return EXIT_FAILURE;
     }
 
-    bool stress = true;
+    fatInitDefault();   // SD card (sd:/); the audio test reports it if this failed
+
+    int which = 0;
     for (;;) {
         bool next;
-        if (stress) {
+        if (which == 0) {
+            screens::AudioClockTest scene(video, input, font);
+            next = runScene(video, input, scene);
+        } else if (which == 1) {
             screens::PlayfieldStress scene(video, input, art, font);
             next = runScene(video, input, scene);
         } else {
@@ -53,7 +60,7 @@ int main(int, char**) {
             next = runScene(video, input, scene);
         }
         if (!next) break;
-        stress = !stress;
+        which = (which + 1) % 3;
     }
 
     input.shutdown();

@@ -36,6 +36,8 @@
 #include "../source/core/chart/StringUtil.h"
 #include "../source/core/timing/TimingData.h"
 #include "../source/core/input/InputFilter.h"
+#include "../source/core/audio/WavFile.h"
+#include "../source/core/timing/SongClock.h"
 
 using namespace ddr;
 
@@ -662,6 +664,118 @@ static void TestInputFilter() {
   }
 }
 
+// ---- WavFile header parsing (M4b) ----
+
+static void Put16(std::vector<uint8_t>& v, uint16_t x) { v.push_back(x & 0xFF); v.push_back(x >> 8); }
+static void Put32(std::vector<uint8_t>& v, uint32_t x) { Put16(v, x & 0xFFFF); Put16(v, x >> 16); }
+static void PutId(std::vector<uint8_t>& v, const char* id) { v.insert(v.end(), id, id + 4); }
+
+// A WAV header: optional LIST chunk (odd length, padded) before fmt, then data.
+static std::vector<uint8_t> MakeWav(uint16_t format, uint16_t channels, uint32_t rate, uint16_t bits,
+                                    uint32_t data_len, bool list_chunk) {
+  std::vector<uint8_t> v;
+  PutId(v, "RIFF"); Put32(v, 0); PutId(v, "WAVE");
+  if (list_chunk) { PutId(v, "LIST"); Put32(v, 3); v.insert(v.end(), {'a', 'b', 'c', 0}); }
+  PutId(v, "fmt "); Put32(v, 16);
+  Put16(v, format); Put16(v, channels); Put32(v, rate);
+  Put32(v, rate * channels * bits / 8); Put16(v, channels * bits / 8); Put16(v, bits);
+  PutId(v, "data"); Put32(v, data_len);
+  return v;
+}
+
+static void TestWavFile() {
+  std::printf("WavFile\n");
+  audio::WavInfo w;
+  {
+    auto h = MakeWav(1, 2, 48000, 16, 48000 * 4, false);
+    CHECK(audio::parseWavHeader(h.data(), h.size(), h.size() + 48000 * 4, w));
+    CHECK(w.rate == 48000 && w.channels == 2 && w.data_offset == 44 && w.frames() == 48000);
+  }
+  {  // padded odd-length chunk before fmt; mono 44.1 kHz
+    auto h = MakeWav(1, 1, 44100, 16, 1000, true);
+    CHECK(audio::parseWavHeader(h.data(), h.size(), h.size() + 1000, w));
+    CHECK(w.rate == 44100 && w.channels == 1 && w.data_offset == 56 && w.frames() == 500);
+  }
+  {  // truncated file: data_bytes clipped to whole frames that exist
+    auto h = MakeWav(1, 2, 48000, 16, 100000, false);
+    CHECK(audio::parseWavHeader(h.data(), h.size(), h.size() + 1001, w));
+    CHECK(w.data_bytes == 1000);
+  }
+  {  // not 16-bit PCM, or not a WAV
+    auto h8 = MakeWav(1, 2, 48000, 8, 100, false);
+    CHECK(!audio::parseWavHeader(h8.data(), h8.size(), h8.size() + 100, w));
+    auto hf = MakeWav(3, 2, 48000, 16, 100, false);   // IEEE float
+    CHECK(!audio::parseWavHeader(hf.data(), hf.size(), hf.size() + 100, w));
+    CHECK(!audio::parseWavHeader(hf.data(), 20, 20, w));   // header cut before data
+    const uint8_t junk[16] = {'R', 'I', 'F', 'X'};
+    CHECK(!audio::parseWavHeader(junk, sizeof junk, sizeof junk, w));
+  }
+}
+
+// ---- SongClock (doc 06 §3.1) ----
+
+static void TestSongClock() {
+  std::printf("SongClock\n");
+  timing::SongClock c;
+  CHECK(c.now(123456) == 0 && !c.started());
+
+  // Simulate ASND: the audio really plays at `rate` (100 ppm fast, worse than any crystal),
+  // a report comes every 2048 frames (~42.7 ms), and each report lands at the next 21.33 ms
+  // mixing tick, so it is late by 0..21.3 ms. Video frames read now() every 16.683 ms.
+  const double rate = 1.0001;
+  const double tick = 1024.0 / 48000 * 1e6, report = 2048.0 / 48000 * 1e6;
+  uint32_t lcg = 1;
+  double next_report_audio = report;
+  double min_err = 1e9, max_err = -1e9, max_jitter = 0;
+  int64_t prev = 0;
+  bool monotonic = true;
+  const uint64_t start = 5000000;   // cpu time when the song starts
+  // Events in time order: reports (song time n*report reached at cpu n*report/rate, seen
+  // `late` us later) and video frames (every 16683 us from 2 s on; errors counted from 10 s).
+  double next_frame = 2e6, report_cpu = -1;
+  auto draw_late = [&] { lcg = lcg * 1664525u + 1013904223u; return (lcg >> 8) / 16777216.0 * tick; };
+  report_cpu = next_report_audio / rate + draw_late();
+  while (next_frame < 300e6) {
+    if (report_cpu <= next_frame) {
+      c.observe(start + (uint64_t)report_cpu, (int64_t)next_report_audio);
+      next_report_audio += report;
+      report_cpu = next_report_audio / rate + draw_late();
+      continue;
+    }
+    const double cpu = next_frame;
+    next_frame += 16683;
+    const double played = cpu * rate;    // true song time at this cpu time
+    const int64_t v = c.now(start + (uint64_t)cpu);
+    const double err = v - played;       // negative: the clock trails by the mean report lateness
+    if (cpu > 10e6 && err < min_err) min_err = err;   // after the low-pass has settled
+    if (cpu > 10e6 && err > max_err) max_err = err;
+    if (prev && v < prev) monotonic = false;
+    if (prev) {
+      const double j = std::fabs((v - prev) - 16683 * rate);   // vs. song time in one frame
+      if (j > max_jitter) max_jitter = j;
+    }
+    prev = v;
+  }
+  std::printf("  clock error %.2f..%.2f ms, frame jitter %.3f ms, snaps %u\n", min_err / 1000,
+              max_err / 1000, max_jitter / 1000, c.snaps());
+  CHECK(monotonic);
+  CHECK(c.snaps() == 0);
+  CHECK(max_jitter < 1000);              // doc 05 M4b: jitter < 1 ms frame to frame
+  CHECK(max_err - min_err < 4000);       // the error stays in a narrow band: no drift
+  CHECK(min_err > -22000 && max_err < 1000);   // trails by at most one tick
+
+  // Hold: with no reports the clock stops kHoldUs after the last one.
+  timing::SongClock h;
+  h.observe(1000000, 0);
+  CHECK(h.now(1100000) == 100000);
+  CHECK(h.now(5000000) == timing::SongClock::kHoldUs);
+  // A report far off (seek or underrun) snaps instead of smoothing, and may go back.
+  h.observe(6000000, 10000000);
+  CHECK(h.snaps() == 1 && h.now(6000000) == 10000000);
+  h.observe(6100000, 0);
+  CHECK(h.snaps() == 2 && h.now(6100000) == 0);
+}
+
 int main(int argc, char** argv) {
   std::string dir = ".";
   int fuzzIterations = 3000;
@@ -681,6 +795,8 @@ int main(int argc, char** argv) {
   TestPackIni();
   TestHeaderTags();
   TestInputFilter();
+  TestWavFile();
+  TestSongClock();
   RunFuzz(dir, fuzzIterations);
 
   std::printf("\n%d checks, %d failures%s\n", g_checks, g_failures,
