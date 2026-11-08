@@ -15,7 +15,7 @@ bool parseWavHeader(const uint8_t* b, size_t size, uint64_t file_size, WavInfo& 
     out = WavInfo{};
     if (size < 12 || std::memcmp(b, "RIFF", 4) || std::memcmp(b + 8, "WAVE", 4)) return false;
     bool have_fmt = false;
-    size_t pos = 12;
+    uint64_t pos = 12;   // 64-bit: a bogus chunk length can't wrap it on the 32-bit Wii
     while (pos + 8 <= size) {
         const uint8_t* id = b + pos;
         const uint32_t len = le32(b + pos + 4);
