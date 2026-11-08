@@ -36,7 +36,6 @@ constexpr float kPaneW = 264;
 constexpr float kGlyph = render::Font::kGlyphW;
 
 constexpr u64 kRepeatDelayUs = 400000, kRepeatUs = 80000;   // held Left/Right
-constexpr double kOffsetStepS = 0.005;
 
 constexpr const char* kStartFolder = "Click 120";   // the hardware checklist's test song
 
@@ -198,8 +197,10 @@ void SongSelect::handleInput() {
         }
         pickCharts();
     }
-    if (down0 & PAD_TRIGGER_L) session_.offset_s -= kOffsetStepS;
-    if (down0 & PAD_TRIGGER_R) session_.offset_s += kOffsetStepS;
+    if (down0 & PAD_TRIGGER_R) {   // the offset calibration screen
+        calibrate_ = true;
+        return;
+    }
 
     // Per player: difficulty, autoplay, leave. Wheel and START from any joined human port.
     const ddr::SongEntry* s = session_.chosen();
@@ -259,11 +260,12 @@ void SongSelect::handleInput() {
 
 bool SongSelect::frame() {
     frames_++;
+    if (frames_ == 300) session_.message.clear();   // shown for about 5 s
     handleInput();
     draw();
     const u16 held = input_.held(0);
     quit_frames_ = ((held & PAD_BUTTON_START) && (held & PAD_TRIGGER_Z)) ? quit_frames_ + 1 : 0;
-    return !picked_ && quit_frames_ < 120;
+    return !picked_ && !calibrate_ && quit_frames_ < 120;
 }
 
 // ---------------------------------------------------------------------------
@@ -287,8 +289,11 @@ void SongSelect::draw() {
     drawSongInfo(s);
     drawGrid(s);
     for (int i = 0; i < Session::kMaxPlayers; i++) drawPane(i, s);
-    font_.print(kLeftX, 436, kGrey, 1, "offset %+.0f ms L/R  Z auto  Y auto P2  X leave  B tests",
-                session_.offset_s * 1000);
+    if (!session_.message.empty())
+        font_.print(kLeftX, 436, 0xFFC040FF, 1, "%s", session_.message.c_str());
+    else
+        font_.print(kLeftX, 436, kGrey, 1, "offset %+.1f ms R calibrate  Z auto  Y P2  X leave",
+                    session_.config.globalOffsetS * 1000);
     if (!session_.scanned)
         font_.print(kLeftX, 200, 0xFF5050FF, 1, "can't open sd:/ddrwii/songs");
     else if (session_.library.packs.empty())

@@ -42,6 +42,7 @@ private:
         int port = 0;
         int chart = 0;              // index into song_.charts
         bool autoplay = false;
+        double input_offset_s = 0;  // config.ini [PortN] InputOffset
         float centre_x = 320;       // playfield layout (doc 06 §11.3)
         game::Judge judge;
         std::vector<game::AutoStep> steps;
@@ -79,7 +80,7 @@ private:
     std::string music_;        // file name in song_dir_
     ddr::Song song_;
     std::vector<Player> players_;
-    double offset_s_ = 0;       // Session::offset_s, globalOffset (doc 06 §3.2): chart time = song time + this
+    double offset_s_ = 0;       // config.ini GlobalOffset (doc 06 §3.2): chart time = song time + this
 
     wii::AudioStream stream_;
     timing::SongClock clock_;

@@ -72,7 +72,7 @@ void printCentred(const render::Font& font, float cx, float y, u32 colour, float
 
 Gameplay::Gameplay(wii::Video& video, const wii::Input& input, const render::ArrowArt& art,
                    const render::Font& font, const Session& session)
-    : video_(video), input_(input), art_(art), font_(font), offset_s_(session.offset_s) {
+    : video_(video), input_(input), art_(art), font_(font), offset_s_(session.config.globalOffsetS) {
     if (loadSong(session)) start();
 }
 
@@ -93,6 +93,7 @@ bool Gameplay::loadSong(const Session& session) {
         Player p;
         p.port = sp.port;
         p.autoplay = sp.autoplay;
+        p.input_offset_s = session.config.ports[sp.port].inputOffsetS;
         const int ci = sp.chart < (int)entry->charts.size() ? entry->charts[sp.chart].index : -1;
         if (ci < 0 || ci >= (int)song_.charts.size() || song_.charts[ci].notes.empty()) {
             error_ = "chart missing in " + entry->SimfilePath();
@@ -224,9 +225,10 @@ void Gameplay::layout() {
 void Gameplay::handleEvents(double offset_us) {
     for (int i = 0; i < input_.eventCount(); i++) {
         const input::LaneEvent& e = input_.event(i);
-        const double t = (e.time_us + offset_us) / 1e6 + offset_s_;
+        const double t0 = (e.time_us + offset_us) / 1e6 + offset_s_;
         for (Player& p : players_) {
             if (p.autoplay || p.port != e.port) continue;
+            const double t = t0 + p.input_offset_s;   // per-mat InputOffset (doc 06 §11.1)
             if (e.pressed)
                 p.judge.press(e.lane, t);
             else
