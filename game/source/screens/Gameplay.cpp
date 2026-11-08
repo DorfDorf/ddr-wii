@@ -59,8 +59,6 @@ u32 withAlpha(u32 rgba, float a) {
     return (rgba & 0xFFFFFF00) | aa;
 }
 
-u64 cpuUs() { return ticks_to_microsecs(gettime()); }
-
 // Grade colours: stars gold, S cyan, A green, B blue, C purple, D grey, failed red.
 u32 tierColour(int tier) {
     if (tier == 0) return 0xFF4040FF;
@@ -179,7 +177,7 @@ void Gameplay::finish() {
 
 bool Gameplay::frame() {
     const u16 held = input_.held(0);
-    const u64 now_us = cpuUs();
+    const u64 now_us = wii::Input::nowUs();
 
     if (state_ == State::Playing) {
         bool quit = false;   // START on any joined port (not START+Z, the exit chord)

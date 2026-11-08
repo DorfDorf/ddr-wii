@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "screens/Session.h"
+#include "screens/SongMedia.h"
 
 namespace wii { class Video; class Input; }
 namespace render { struct ArrowArt; class Font; }
@@ -49,6 +50,7 @@ private:
     void drawGrid(const ddr::SongEntry* s);
     void drawPane(int slot, const ddr::SongEntry* s);
     void drawWheel();
+    void updateMedia();                // ask for the banner and preview once the cursor rests
 
     wii::Video& video_;
     const wii::Input& input_;
@@ -65,6 +67,17 @@ private:
     bool picked_ = false;
     bool calibrate_ = false;
     bool back_ = false;
+
+    struct PaneBest {                  // drawPane's cached high-score lookup, per slot
+        int pack = -2, song = -2, chart = -1;
+        const game::HighScoreEntry* entry = nullptr;
+    };
+    PaneBest pane_best_[Session::kMaxPlayers];
+
+    SongMedia media_;                  // banner + preview worker (M5 step 6)
+    int media_pack_ = -2, media_song_ = -2;   // the row the cursor was last seen on
+    u64 media_moved_us_ = 0;
+    bool media_requested_ = false;
 };
 
 }  // namespace screens

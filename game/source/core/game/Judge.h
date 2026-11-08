@@ -64,9 +64,9 @@ struct Score {
   int holds_let_go = 0;
   int combo = 0;
   int max_combo = 0;
-  int held_misses = 0;
-  int mines_hit = 0;
-  int mines_avoided = 0;         // notes missed while their lane was held (stuck/dead panel?)
+  int held_misses = 0;         // notes missed while their lane was held (stuck/dead panel?)
+  int mines_hit = 0;           // the lane was down as the mine passed, or pressed near it
+  int mines_avoided = 0;
   int dance_points = 0;
   int possible_points = 0;     // for the whole chart, set at load
   int hits = 0;                // notes hit (misses left out), for the timing stats

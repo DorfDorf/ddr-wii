@@ -46,7 +46,13 @@ public:
     static void initAsnd();
 
     // Opens a .wav, .ogg or .mp3, starts the fill thread and fills the ring. Doesn't play yet.
-    bool open(const char* path);
+    // start_s > 0 starts that far into the file (song-select previews); the reports then count
+    // from there.
+    bool open(const char* path, double start_s = 0);
+    // Stops, seeks to start_s and fills the ring again (a preview looping). Then call play().
+    bool restart(double start_s);
+    // 0-255; applies now if playing, else from the next play().
+    void setVolume(int volume);
     void play();
     void close();
     ~AudioStream() { close(); }
@@ -76,6 +82,8 @@ private:
     static void* fillThread(void* self);
     static void voiceCallback(s32 voice);
     void fillOnce();
+    void startFill();
+    void stopFill();
 
     void* source_ = nullptr;     // Source* (WiiAudio.cpp)
     const char* error_ = "";
@@ -90,6 +98,7 @@ private:
     u32 lwp_ = 0;                // lwp_t
     volatile bool stop_ = false;
     bool playing_ = false;
+    int volume_ = 255;
 };
 
 }  // namespace wii

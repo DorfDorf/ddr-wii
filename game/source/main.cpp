@@ -49,6 +49,7 @@ void saveConfigIfChanged(screens::Session& session) {
 }
 
 constexpr const char* kScoresPath = "sd:/ddrwii/scores.txt";
+constexpr const char* kCachePath = "sd:/ddrwii/cache.txt";
 
 // Writes scores.txt after a song that recorded a score.
 void saveScoresIfChanged(screens::Session& session) {
@@ -79,9 +80,16 @@ int main(int, char**) {
     wii::Input input;
     input.init((u32)session.config.inputDebounceMs * 1000);
 
+    // The song cache (M5 step 6): only simfiles that changed since the last boot are parsed.
     const u64 t0 = ticks_to_microsecs(gettime());
-    session.scanned = ddr::ScanSongLibrary(kSongsRoot, session.library, session.config.defaultSyncOffset);
+    ddr::SongCache cache;
+    ddr::LoadSongCache(kCachePath, cache);   // none yet is fine
+    session.scanned = ddr::ScanSongLibrary(kSongsRoot, session.library, session.config.defaultSyncOffset,
+                                           &cache);
     session.scan_us = ticks_to_microsecs(gettime()) - t0;
+    session.cache_hits = cache.hits;
+    if (session.scanned && cache.dirty && !ddr::SaveSongCache(kCachePath, cache))
+        session.message = "Couldn't write sd:/ddrwii/cache.txt";
 
     int which = 0;
     bool in_song_select = false;   // else the play-mode screen

@@ -27,6 +27,9 @@
 #include <tuple>
 #include <vector>
 
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include "../source/core/chart/Chart.h"
 #include "../source/core/chart/MsdFile.h"
 #include "../source/core/chart/NoteData.h"
@@ -1131,6 +1134,7 @@ static void TestSongLibrary(const std::string& dir) {
   CHECK(b.info.groupName == "B Pack");
   CHECK(b.info.displayTitle == "Bee Pack");
   CHECK(b.info.hasPackIni);
+  CHECK(b.banner.empty() && lib.packs[1].banner.empty());   // no images in the pack folders
   CHECK_NEAR(b.info.syncOffset, -0.009, 1e-12);
   CHECK(b.songs.size() == 2);
   if (b.songs.size() == 2) {
@@ -1165,6 +1169,101 @@ static void TestSongLibrary(const std::string& dir) {
   ScanSongLibrary(dir + "/library", itg, DefaultSyncOffset::ITG);
   CHECK(itg.packs.size() == 2 && itg.packs.size() > 1 &&
         std::fabs(itg.packs[1].info.syncOffset + 0.009) < 1e-12);
+}
+
+static bool SameLibrary(const SongLibrary& a, const SongLibrary& b) {
+  if (a.packs.size() != b.packs.size() || a.warnings != b.warnings) return false;
+  for (size_t p = 0; p < a.packs.size(); p++) {
+    const auto& x = a.packs[p].songs;
+    const auto& y = b.packs[p].songs;
+    if (x.size() != y.size()) return false;
+    for (size_t i = 0; i < x.size(); i++) {
+      const SongEntry &s = x[i], &t = y[i];
+      if (s.dir != t.dir || s.folder != t.folder || s.simfile != t.simfile || s.music != t.music ||
+          s.banner != t.banner || s.title != t.title || s.subtitle != t.subtitle ||
+          s.artist != t.artist || s.bpmRandom != t.bpmRandom ||
+          std::fabs(s.bpmMin - t.bpmMin) > 1e-5 || std::fabs(s.bpmMax - t.bpmMax) > 1e-5 ||
+          std::fabs(s.lengthSeconds - t.lengthSeconds) > 1e-5 ||
+          std::fabs(s.sampleStart - t.sampleStart) > 1e-5 || s.charts.size() != t.charts.size())
+        return false;
+      for (size_t c = 0; c < s.charts.size(); c++) {
+        const ChartInfo &m = s.charts[c], &n = t.charts[c];
+        if (m.index != n.index || m.difficulty != n.difficulty || m.meter != n.meter ||
+            m.description != n.description || m.steps != n.steps || m.jumps != n.jumps ||
+            m.holds != n.holds || m.rolls != n.rolls || m.mines != n.mines)
+          return false;
+      }
+    }
+  }
+  return true;
+}
+
+static bool WriteText(const std::string& path, const std::string& text) {
+  FILE* f = std::fopen(path.c_str(), "wb");
+  if (!f) return false;
+  std::fwrite(text.data(), 1, text.size(), f);
+  return std::fclose(f) == 0;
+}
+
+static void TestSongCache(const std::string& dir) {
+  std::printf("[unit] song library cache\n");
+  SongLibrary plain;
+  ScanSongLibrary(dir + "/library", plain);
+
+  // First scan: everything is parsed; the second (from the saved text) reuses all of it.
+  SongCache cache;
+  SongLibrary first;
+  CHECK(ScanSongLibrary(dir + "/library", first, DefaultSyncOffset::Null, &cache));
+  CHECK(cache.hits == 0 && cache.misses == 8 && cache.dirty);   // 3 songs + 5 skipped
+  CHECK(SameLibrary(first, plain));
+  const std::string path = dir + "/build/cache-test.txt";
+  std::remove(path.c_str());
+  CHECK(SaveSongCache(path, cache));
+  SongCache loaded;
+  CHECK(LoadSongCache(path, loaded) && loaded.items.size() == 8);
+  SongLibrary second;
+  CHECK(ScanSongLibrary(dir + "/library", second, DefaultSyncOffset::Null, &loaded));
+  CHECK(loaded.hits == 8 && loaded.misses == 0 && !loaded.dirty);
+  CHECK(SameLibrary(second, plain));
+  std::remove(path.c_str());
+
+  // Another version, or junk, is ignored.
+  SongCache old;
+  old.Parse("ddr-wii song cache 0\n" + cache.Write().substr(cache.Write().find('\n') + 1));
+  CHECK(old.items.empty());
+  old.Parse(cache.Write() + "O\tbroken\n");
+  CHECK(old.items.size() == 8);
+
+  // Changes in a song folder are noticed: an edited simfile, a new file, a removed song.
+  const std::string root = dir + "/build/cachelib";
+  const std::string song = root + "/P/S";
+  std::string sm;
+  CHECK(ReadFileToString(dir + "/library/B Pack/Zeta/zeta.sm", sm));
+  mkdir(root.c_str(), 0777);
+  mkdir((root + "/P").c_str(), 0777);
+  mkdir(song.c_str(), 0777);
+  CHECK(WriteText(song + "/zeta.sm", sm) && WriteText(song + "/ZETA.OGG", "x"));
+  SongCache c;
+  SongLibrary lib;
+  ScanSongLibrary(root, lib, DefaultSyncOffset::Null, &c);
+  CHECK(c.misses == 1 && lib.SongCount() == 1);
+  ScanSongLibrary(root, lib, DefaultSyncOffset::Null, &c);
+  CHECK(c.hits == 1 && c.misses == 0);
+  CHECK(WriteText(song + "/zeta.sm", sm + "\n// edited\n"));
+  ScanSongLibrary(root, lib, DefaultSyncOffset::Null, &c);
+  CHECK(c.misses == 1);
+  CHECK(WriteText(song + "/zeta-bn.png", "x"));
+  ScanSongLibrary(root, lib, DefaultSyncOffset::Null, &c);
+  CHECK(c.misses == 1 && lib.SongCount() == 1);
+  std::remove((song + "/zeta.sm").c_str());
+  std::remove((song + "/ZETA.OGG").c_str());
+  std::remove((song + "/zeta-bn.png").c_str());
+  rmdir(song.c_str());
+  c.dirty = false;
+  ScanSongLibrary(root, lib, DefaultSyncOffset::Null, &c);
+  CHECK(lib.SongCount() == 0 && c.items.empty() && c.dirty);
+  rmdir((root + "/P").c_str());
+  rmdir(root.c_str());
 }
 
 // ---------------------------------------------------------------------------
@@ -1360,6 +1459,7 @@ int main(int argc, char** argv) {
   TestAutoplayCorpus(dir);
   TestTestSong(dir);
   TestSongLibrary(dir);
+  TestSongCache(dir);
   TestConfig(dir);
   TestCalibration();
   TestScoresAndGrades(dir);

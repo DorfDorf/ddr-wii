@@ -15,7 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include "../chart/SmLoader.h"  // ReadFileToString
+#include "../util/TextFile.h"
 #include "../chart/StringUtil.h"
 
 namespace ddr {
@@ -101,22 +101,6 @@ bool LoadConfig(const std::string& path, Config& out) {
 
 bool SaveConfig(const std::string& path, const Config& c) {
   return WriteFileAtomic(path, WriteConfigText(c));
-}
-
-bool WriteFileAtomic(const std::string& path, const std::string& text) {
-  const std::string tmp = path + ".tmp";
-  FILE* f = std::fopen(tmp.c_str(), "wb");
-  if (!f) return false;
-  const bool wrote = std::fwrite(text.data(), 1, text.size(), f) == text.size();
-  const bool closed = std::fclose(f) == 0;
-  if (!wrote || !closed) {
-    std::remove(tmp.c_str());
-    return false;
-  }
-  if (std::rename(tmp.c_str(), path.c_str()) == 0) return true;
-  // FAT (libfat) and Windows don't rename over an existing file.
-  std::remove(path.c_str());
-  return std::rename(tmp.c_str(), path.c_str()) == 0;
 }
 
 }  // namespace ddr

@@ -56,14 +56,12 @@ std::string WriteConfigText(const Config& c);
 
 /** Reads path into out. Returns false (out unchanged) if there is no file. */
 bool LoadConfig(const std::string& path, Config& out);
-/** Writes path + ".tmp", then renames it over path. Returns false on any
+/** Writes path + ".tmp", then renames it over path (WriteFileAtomic in
+ *  util/TextFile.h). Returns false on any
  *  error; the old file is then left as it was, except when only the final
  *  rename failed (FAT can't rename over a file, so the old one is removed
  *  first). */
 bool SaveConfig(const std::string& path, const Config& c);
-
-/** Writes text to path + ".tmp", then renames it over path, as above. */
-bool WriteFileAtomic(const std::string& path, const std::string& text);
 
 }  // namespace ddr
 

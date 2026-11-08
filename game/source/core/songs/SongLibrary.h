@@ -17,6 +17,7 @@
 #ifndef DDR_CORE_SONGS_SONGLIBRARY_H
 #define DDR_CORE_SONGS_SONGLIBRARY_H
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -58,6 +59,7 @@ struct SongEntry {
 struct PackEntry {
   std::string dir;  // "<root>/<pack>/"
   PackInfo info;    // syncOffset goes to Song::SetGroupOffset() at load time
+  std::string banner;  // file name in dir (Pack.ini Banner, else guessed); "" if none
   std::vector<SongEntry> songs;
 };
 
@@ -70,6 +72,34 @@ struct SongLibrary {
 };
 
 /**
+ * The scan's results per song folder, kept in sd:/ddrwii/cache.txt so a boot
+ * only parses the simfiles that changed. An item is reused when its
+ * signature matches: a hash of the folder's file and subfolder names and the
+ * simfile's size and modification time. Songs that were skipped are cached
+ * too, with their warning. Items for folders that are gone are dropped.
+ */
+struct SongCache {
+  static constexpr int kVersion = 1;  // bump when SongEntry/ChartInfo change
+  struct Item {
+    std::string sig;
+    bool ok = false;      // false: skipped, see warning
+    SongEntry song;       // ok only
+    std::string warning;  // !ok only
+  };
+  std::map<std::string, Item> items;  // by SongEntry::dir
+  int hits = 0, misses = 0;           // from the last scan
+  bool dirty = false;                 // changed by the last scan: save it
+
+  /** Replaces items with the text of a cache.txt. A different version or a
+   *  bad line drops what can't be read; those songs are parsed again. */
+  void Parse(const std::string& text);
+  std::string Write() const;
+};
+
+bool LoadSongCache(const std::string& path, SongCache& out);
+bool SaveSongCache(const std::string& path, const SongCache& cache);
+
+/**
  * Scan root ("sd:/ddrwii/songs"). A pack is a folder in root, a song is a
  * folder in a pack holding a .ssc or .sm. Files directly in root and folders
  * deeper than <pack>/<song>/ are ignored, as in StepMania. A song is kept if
@@ -79,7 +109,8 @@ struct SongLibrary {
  * Returns false only if root can't be opened.
  */
 bool ScanSongLibrary(const std::string& root, SongLibrary& out,
-                     DefaultSyncOffset def = DefaultSyncOffset::Null);
+                     DefaultSyncOffset def = DefaultSyncOffset::Null,
+                     SongCache* cache = nullptr);
 
 /** The entries of one folder, split into subfolders and files, sorted, without
  *  "." and "..". Returns false if the folder can't be opened. */

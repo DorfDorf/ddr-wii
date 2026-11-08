@@ -30,6 +30,7 @@ struct Session {
     ddr::SongLibrary library;
     u64 scan_us = 0;
     bool scanned = false;                   // false: sd:/ddrwii/songs couldn't be opened
+    int cache_hits = 0;                     // songs taken from cache.txt instead of parsed
 
     // Music wheel: the open pack (-1 none) and the cursor (song -1 = on the pack's header).
     int open_pack = -1;

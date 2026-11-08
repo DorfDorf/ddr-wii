@@ -15,6 +15,7 @@
 #include "SongLibrary.h"
 
 #include <dirent.h>
+#include <cstdio>
 #include <sys/stat.h>
 
 #include <algorithm>
@@ -64,8 +65,8 @@ std::string PickMusic(const Song& song, const std::vector<std::string>& files) {
   return std::string();
 }
 
-std::string PickBanner(const Song& song, const std::vector<std::string>& files) {
-  std::string b = FindNoCase(files, song.banner);
+std::string PickBanner(const std::string& tag, const std::vector<std::string>& files) {
+  std::string b = FindNoCase(files, tag);
   if (!b.empty() && IsImage(b)) return b;
   // No (valid) #BANNER: a file named like "bn.png", "song-bn.png" or "banner.png".
   for (const std::string& f : files) {
@@ -157,13 +158,88 @@ bool ListFolder(const std::string& dir, std::vector<std::string>& folders,
   return true;
 }
 
-bool ScanSongLibrary(const std::string& rootIn, SongLibrary& out, DefaultSyncOffset def) {
+namespace {
+
+// Scans one song folder whose listing is files. Returns false with a warning
+// (without the "<pack>/<song>: " prefix) when the song can't be played.
+bool ScanSong(const std::vector<std::string>& files, SongEntry& s, std::string& warning) {
+  s.simfile = PickSimfile(files);
+  if (s.simfile.empty()) {
+    warning = "no .ssc or .sm";
+    return false;
+  }
+  Song song;
+  if (!LoadSongFile(s.SimfilePath(), song)) {
+    warning = s.simfile + " has no charts";
+    return false;
+  }
+  for (size_t i = 0; i < song.charts.size(); i++) {
+    const Chart& c = song.charts[i];
+    if (c.stepsType != "dance-single" || c.notes.empty()) continue;
+    ChartInfo ci;
+    ci.index = (int)i;
+    ci.difficulty = c.difficulty;
+    ci.meter = c.meter;
+    ci.description = c.description;
+    CountNotes(c, ci);
+    for (const Note& n : c.notes) s.lengthSeconds = std::max(s.lengthSeconds, n.IsHold() ? n.endTime : n.time);
+    s.charts.push_back(ci);
+  }
+  if (s.charts.empty()) {
+    warning = "no dance-single charts";
+    return false;
+  }
+  std::stable_sort(s.charts.begin(), s.charts.end(), [](const ChartInfo& a, const ChartInfo& b) {
+    return std::make_tuple((int)a.difficulty, a.meter) < std::make_tuple((int)b.difficulty, b.meter);
+  });
+  s.music = PickMusic(song, files);
+  if (s.music.empty()) {
+    warning = "no audio file";
+    return false;
+  }
+  s.banner = PickBanner(song.banner, files);
+  s.title = song.title.empty() ? s.folder : song.title;
+  s.subtitle = song.subtitle;
+  s.artist = song.artist;
+  s.titleTranslit = song.titleTranslit;
+  s.subtitleTranslit = song.subtitleTranslit;
+  s.sampleStart = song.sampleStart;
+  s.sampleLength = song.sampleLength;
+  BpmRange(song, s);
+  return true;
+}
+
+// FNV-1a over the folder listing and the simfile's size and time, as hex.
+std::string Signature(const std::string& dir, const std::vector<std::string>& folders,
+                      const std::vector<std::string>& files) {
+  unsigned long long h = 1469598103934665603ULL;
+  auto add = [&h](const std::string& s) {
+    for (unsigned char c : s) h = (h ^ c) * 1099511628211ULL;
+    h = (h ^ 0xFF) * 1099511628211ULL;   // separator
+  };
+  for (const std::string& f : folders) add("/" + f);
+  for (const std::string& f : files) add(f);
+  const std::string sim = PickSimfile(files);
+  struct stat st;
+  if (!sim.empty() && stat((dir + sim).c_str(), &st) == 0)
+    add(std::to_string((long long)st.st_size) + ":" + std::to_string((long long)st.st_mtime));
+  char buf[20];
+  std::snprintf(buf, sizeof buf, "%016llx", h);
+  return buf;
+}
+
+}  // namespace
+
+bool ScanSongLibrary(const std::string& rootIn, SongLibrary& out, DefaultSyncOffset def,
+                     SongCache* cache) {
   out = SongLibrary();
   const std::string root = WithSlash(rootIn);
   std::vector<std::string> packFolders, rootFiles;
   if (!ListFolder(root, packFolders, rootFiles)) return false;
 
   std::vector<std::string> songFolders, packFiles, folders, files;
+  std::map<std::string, SongCache::Item> seen;   // the cache after this scan
+  if (cache) cache->hits = cache->misses = 0;
   for (const std::string& packName : packFolders) {
     PackEntry pack;
     pack.dir = root + packName + "/";
@@ -175,6 +251,7 @@ bool ScanSongLibrary(const std::string& rootIn, SongLibrary& out, DefaultSyncOff
       pack.info = ParsePackIni(packName, &iniText, def);
     else
       pack.info = ParsePackIni(packName, nullptr, def);
+    pack.banner = PickBanner(pack.info.banner, packFiles);
 
     for (const std::string& songName : songFolders) {
       const std::string where = packName + "/" + songName;
@@ -182,50 +259,30 @@ bool ScanSongLibrary(const std::string& rootIn, SongLibrary& out, DefaultSyncOff
       s.dir = pack.dir + songName + "/";
       s.folder = songName;
       if (!ListFolder(s.dir, folders, files)) continue;
-      s.simfile = PickSimfile(files);
-      if (s.simfile.empty()) {
-        out.warnings.push_back(where + ": no .ssc or .sm");
-        continue;
+      SongCache::Item item;
+      if (cache) {
+        item.sig = Signature(s.dir, folders, files);
+        auto it = cache->items.find(s.dir);
+        if (it != cache->items.end() && it->second.sig == item.sig) {
+          cache->hits++;
+          item = it->second;
+        } else {
+          cache->misses++;
+          cache->dirty = true;
+          item.ok = ScanSong(files, s, item.warning);
+          if (item.ok) item.song = s;
+        }
+      } else {
+        item.ok = ScanSong(files, s, item.warning);
+        if (item.ok) item.song = s;
       }
-      Song song;
-      if (!LoadSongFile(s.SimfilePath(), song)) {
-        out.warnings.push_back(where + ": " + s.simfile + " has no charts");
-        continue;
+      if (item.ok) {
+        pack.songs.push_back(item.song);
+        pack.songs.back().dir = s.dir;   // the cache key, so already equal
+      } else {
+        out.warnings.push_back(where + ": " + item.warning);
       }
-      for (size_t i = 0; i < song.charts.size(); i++) {
-        const Chart& c = song.charts[i];
-        if (c.stepsType != "dance-single" || c.notes.empty()) continue;
-        ChartInfo ci;
-        ci.index = (int)i;
-        ci.difficulty = c.difficulty;
-        ci.meter = c.meter;
-        ci.description = c.description;
-        CountNotes(c, ci);
-        for (const Note& n : c.notes) s.lengthSeconds = std::max(s.lengthSeconds, n.IsHold() ? n.endTime : n.time);
-        s.charts.push_back(ci);
-      }
-      if (s.charts.empty()) {
-        out.warnings.push_back(where + ": no dance-single charts");
-        continue;
-      }
-      std::stable_sort(s.charts.begin(), s.charts.end(), [](const ChartInfo& a, const ChartInfo& b) {
-        return std::make_tuple((int)a.difficulty, a.meter) < std::make_tuple((int)b.difficulty, b.meter);
-      });
-      s.music = PickMusic(song, files);
-      if (s.music.empty()) {
-        out.warnings.push_back(where + ": no audio file");
-        continue;
-      }
-      s.banner = PickBanner(song, files);
-      s.title = song.title.empty() ? songName : song.title;
-      s.subtitle = song.subtitle;
-      s.artist = song.artist;
-      s.titleTranslit = song.titleTranslit;
-      s.subtitleTranslit = song.subtitleTranslit;
-      s.sampleStart = song.sampleStart;
-      s.sampleLength = song.sampleLength;
-      BpmRange(song, s);
-      pack.songs.push_back(std::move(s));
+      if (cache) seen[s.dir] = std::move(item);
     }
     if (pack.songs.empty()) continue;
 
@@ -243,6 +300,10 @@ bool ScanSongLibrary(const std::string& rootIn, SongLibrary& out, DefaultSyncOff
     return std::make_tuple(SortKey(a.info.sortTitle), Lower(a.info.groupName)) <
            std::make_tuple(SortKey(b.info.sortTitle), Lower(b.info.groupName));
   });
+  if (cache) {
+    if (seen.size() != cache->items.size()) cache->dirty = true;   // songs were removed
+    cache->items = std::move(seen);
+  }
   return true;
 }
 

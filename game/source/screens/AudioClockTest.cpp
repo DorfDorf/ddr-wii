@@ -31,7 +31,6 @@ constexpr Track kTracks[] = {
 // lateness; drift in it means content and clock part ways (underruns, wrong rate).
 constexpr int kTrackCount = sizeof(kTracks) / sizeof(kTracks[0]);
 
-u64 cpuUs() { return ticks_to_microsecs(gettime()); }
 s64 absS64(s64 v) { return v < 0 ? -v : v; }
 
 }  // namespace
@@ -53,7 +52,7 @@ void AudioClockTest::start() {
     drift_min_us_ = drift_max_us_ = 0;
     seconds_ = 0;
     if (stream_.open(kTracks[file_].path)) stream_.play();
-    start_cpu_us_ = second_start_us_ = cpuUs();
+    start_cpu_us_ = second_start_us_ = wii::Input::nowUs();
     video_.resetStats();   // the preload above may have cost a frame; count from here
 }
 
@@ -66,7 +65,7 @@ bool AudioClockTest::frame() {
         start();
     }
 
-    const u64 cpu = cpuUs();
+    const u64 cpu = wii::Input::nowUs();
     if (stream_.isOpen()) {
         const wii::AudioStream::TickReport t = stream_.tickReport();
         if (t.count != last_tick_report_) {
@@ -91,7 +90,7 @@ bool AudioClockTest::frame() {
 }
 
 void AudioClockTest::bufferDiff(s64 d) {
-    const u64 elapsed = cpuUs() - start_cpu_us_;
+    const u64 elapsed = wii::Input::nowUs() - start_cpu_us_;
     diff_us_ = d;
     diff_sum_ += d;
     diff_n_++;
