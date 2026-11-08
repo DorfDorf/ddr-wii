@@ -91,7 +91,7 @@ class Judge {
   // State of one judged note.
   struct NoteState {
     double time = 0, end_time = 0;
-    int row = 0;
+    int row = 0, end_row = 0;   // chart rows (48 per beat); end_row = row for taps
     int lane = 0;
     int row_index = 0;           // into the row table
     bool hold = false;

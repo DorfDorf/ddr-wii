@@ -142,7 +142,7 @@ Our game reads songs from `sd:/`. In Dolphin **[mem — confirm the labels in yo
 Without changing the settings, the same can be turned on per run from the command line (checked with Dolphin 2609a, 2026-11-08):
 
 ```bash
-tools/stage-sd.sh "$(cygpath -u "$USERPROFILE")/Dolphin-x64/User/Load/WiiSDSync"
+tools/stage-sd.sh dolphin   # = <profile>/Dolphin-x64/User/Load/WiiSDSync
 make -C game run-dolphin DOLPHIN_ARGS='-C Dolphin.Core.WiiSDCard=True -C Dolphin.Core.WiiSDCardEnableFolderSync=True'
 ```
 
