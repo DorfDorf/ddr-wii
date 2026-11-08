@@ -151,7 +151,7 @@ void RenderTest::drawLanes(float song_beat) {
         const bool pressed = held_ & kLaneButton[lane];
         const float scale = pressed ? 0.9f : 1.0f + 0.10f * pulse;
         const u32 colour = pressed ? 0xFFFFFFFF : lerpColour(0x909090FF, 0xFFFFFFFF, pulse);
-        GRRLIB_DrawImg(laneX(lane) - half, kReceptorY - half, art_.receptor, kLaneDegrees[lane],
+        GRRLIB_DrawImg(laneX(lane), kReceptorY, art_.receptor, kLaneDegrees[lane],
                        scale, scale, colour);
     }
 
@@ -164,7 +164,7 @@ void RenderTest::drawLanes(float song_beat) {
         const int lane = kPattern[idx % kPatternN];
         const float y = kReceptorY + (beat - song_beat) * kPixelsPerBeat;
         const bool on_beat = (idx % 2) == 0;
-        GRRLIB_DrawImg(laneX(lane) - half, y - half, art_.note, kLaneDegrees[lane], 1.0f, 1.0f,
+        GRRLIB_DrawImg(laneX(lane), y, art_.note, kLaneDegrees[lane], 1.0f, 1.0f,
                        on_beat ? kColour4th : kColour8th);
     }
 }
