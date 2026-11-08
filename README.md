@@ -2,7 +2,7 @@
 
 A four-panel rhythm game (StepMania-style) for Nintendo Wii homebrew, played with a GameCube-port DDR dance pad. Developed and tested in Dolphin first, then on real hardware via the Homebrew Channel.
 
-**Status:** M1 (toolchain + pad test) and M2 (graphics) are done. M2b (2- and 4-player playfield stress test) is built and passes in Dolphin, and is waiting for its real-Wii run. `game/` boots into the M2b test, which cycles through 1–4 worst-case playfields and shows frame time, CPU time, GPU wait, draw calls, texture switches and drawn area for each. B switches to the M2 render test (receptors, a time-driven arrow stream, a 1600-sprite stress ramp). Next: M2b on the Wii (`make -C game run` with `WIILOAD` set), M3 (real dance mat on a real Wii) and M4a (chart parser on PC). See [doc 03](docs/03-development-environment.md) for the installed setup.
+**Status:** M1 (toolchain + pad test) and M2 (graphics) are done, and the M4a chart parser and timing engine are in `game/source/core/` (tests below). M2b (2- and 4-player playfield stress test) passed on a real Wii: 4 players hold full frame rate using under 3 ms of each 16.7 ms frame. The game targets 2 players for now, with 4 to follow ([doc 05 M2b](docs/05-development-roadmap.md)). `game/` boots into the M2b test, which cycles through 1–4 worst-case playfields and shows frame time, CPU time, GPU wait, draw calls, texture switches and drawn area for each. B switches to the M2 render test (receptors, a time-driven arrow stream, a 1600-sprite stress ramp). Next: M3 (real dance mat on a real Wii). See [doc 03](docs/03-development-environment.md) for the installed setup.
 
 ## Build
 
@@ -25,7 +25,7 @@ Or use the VS Code tasks: `Ctrl+Shift+B` builds the game, and *Run Test Task* bo
 
 ## Plan in one paragraph
 
-A new lightweight Wii-native engine built with devkitPPC + libogc + GRRLIB. Audio streams through ASND, and the audio sample clock is the master song clock. The `.sm`/`.ssc` parser and timing engine are ported from ITGmania v1.3.0 (GPLv3, like this project), and the dance mat is read through libogc's `PAD_*` API as a standard GameCube controller. Local multiplayer uses one mat per GameCube port: 2 players is a requirement, and 4 is a stretch goal pending a performance and readability test ([doc 06 §11](docs/06-technical-design.md#11-local-multiplayer-24-players)).
+A new lightweight Wii-native engine built with devkitPPC + libogc + GRRLIB. Audio streams through ASND, and the audio sample clock is the master song clock. The `.sm`/`.ssc` parser and timing engine are ported from ITGmania v1.3.0 (GPLv3, like this project), and the dance mat is read through libogc's `PAD_*` API as a standard GameCube controller. Local multiplayer uses one mat per GameCube port: 2 players for now. 4 players passed its performance and readability test on a real Wii, and will be added once the game works end to end ([doc 06 §11](docs/06-technical-design.md#11-local-multiplayer-24-players)).
 
 ## Docs
 

@@ -8,7 +8,7 @@
 
 **Goals:** a single-player four-lane `dance-single` game that reads `.sm`/`.ssc` from SD, plays OGG/MP3, scrolls arrows in sync, judges taps and holds, shows a combo and score, and saves high scores. It runs in Dolphin and on a real Wii with a GameCube dance mat.
 
-**Local multiplayer:** **2 players is a requirement, 4 is a stretch goal** that depends on a performance and readability check (see §11). Each player uses their own mat on their own GameCube port and plays the same song with their own difficulty and scroll speed. The core is built per player from the start, even though the first playable milestones run with one player.
+**Local multiplayer:** **2 players is the target.** 4 players passed both the performance and readability checks on a real Wii (M2b), but it is **deferred until there's a working product** (after M6), by decision on 2026-11-08 (see §11). Each player uses their own mat on their own GameCube port and plays the same song with their own difficulty and scroll speed. The core is built per player from the start, even though the first playable milestones run with one player.
 
 **Non-goals (for now):** background videos, BGCHANGES, mods and attacks, Lua or themes, courses, doubles (one player on two mats, which the per-port design makes easy to add later), online play, editing. All of these can be added later without changing the core.
 
@@ -240,6 +240,8 @@ The `core/` code has no dependency on libogc, so `game/tests/` can compile it wi
 
 ## 11. Local multiplayer (2–4 players)
 
+**Scope (decided 2026-11-08): build 2 players now; 4 players later.** M2b showed 4P is fast enough and readable on a real Wii, but it waits until the game works end to end. The per-player design below costs nothing extra for 2P, so the only 4P-specific work left for later is the 3–4P layout (§11.3), the join flow for ports 3–4, and testing with four mats.
+
 ### 11.1 What is shared and what is per player
 
 | Shared (one per song) | Per player |
@@ -271,7 +273,11 @@ The logical canvas is 640 px wide. Four lanes at 64 px are 256 px, so:
 | 3–4 | ~36 px (arrows scaled ≈ 0.55) | ~144 px, plus gaps | Four columns of 160 px. Judgement and combo text sits inside each column |
 
 - Every draw goes through a `Playfield{ x, laneWidth, scale }` built from this table, so 1, 2 and 4 players use the same rendering code.
-- **[exp] 4-player readability:** 36 px arrows on a 480-line TV, 3 m from the screen, may be too small to read at high scroll speeds. Check it on a real TV before committing to 4P. If it fails, try a 16:9 mode: with the Wii set to widescreen, the TV stretches the 640 px framebuffer, so drawing for an 854 px-wide logical canvas gives each player room for lanes about 48 px wide on screen.
+- **Overscan safe area (found in the M2b hardware run).** CRTs and many LCDs crop the edges of the Wii picture. On the test TV (Sony Bravia, 480p) the 4P layout lost the left edge of P1's left lane, the top of the life bars and the bottom of the screen. So:
+  - Playfields stay inside the **action-safe area** (5% margin: x 32–608, y 24–456). For 3–4P that means four 144 px columns with **32 px lanes** (scale 0.5), slightly smaller than the 36 px tested.
+  - Text and HUD (scores, life bars, judgement, combo, debug overlay) stay inside the **title-safe area** (10% margin: x 64–576, y 48–432).
+  - An **overscan adjustment** in Options (shrink or grow the safe area per TV, stored in `config.ini`) covers TVs that crop more or less.
+- **4-player readability: passed** (M2b, 2026-11-08). 36 px arrows were readable from playing distance on the test TV. When 4P is picked up, recheck at 32 px lanes inside the safe area. A 16:9 mode (Wii set to widescreen, drawing for an 854 px-wide logical canvas, lanes about 48 px wide on screen) remains an option if needed.
 
 ### 11.4 Rules
 
@@ -297,3 +303,5 @@ The M2 render test already holds full frame rate with **1,600 sprites** in Dolph
 - **Four mats polled at once:** check that SI polling with four devices connected doesn't change the PAD sampling interval measured in M3.
 
 The test plan is in doc 05 (M2b, then the M3 and M6 hardware checks).
+
+**Result (M2b on a real Wii, 2026-11-08):** performance is settled. With the worst-case scene, 4 players took 1.58 ms of CPU and about 1 ms of GPU wait per 16.7 ms frame, with no dropped frames at any player count (full table in doc 05, M2b). That's roughly 5× headroom, so neither draw calls nor fill rate limits 4 players, and the atlas and batching mitigations above aren't needed for now. Dolphin's CPU numbers turned out slightly *higher* than hardware for this code. The open questions for 4P are readability and the overscan safe area (§11.3), not speed.
