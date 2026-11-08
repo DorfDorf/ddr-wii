@@ -22,10 +22,16 @@
 
 namespace ddr {
 
+/** Casual: no life bar, nobody fails. Competitive: ITG's life bar and
+ *  failing (Simply Love's Casual and ITG modes). */
+enum class PlayMode { Casual, Competitive };
+
 struct PortConfig {
   /** Seconds added to this port's step times (a mat that reads later than
    *  another). */
   double inputOffsetS = 0;
+  /** Scroll speed, ITG's x-mod: 1 = 64 px per beat. 0.25-8, steps of 0.25. */
+  double scrollSpeed = 2.0;
 };
 
 struct Config {
@@ -38,6 +44,7 @@ struct Config {
   DefaultSyncOffset defaultSyncOffset = DefaultSyncOffset::Null;
   /** Pad debounce window (InputFilter); 0-50 ms. */
   int inputDebounceMs = 20;
+  PlayMode playMode = PlayMode::Casual;
   PortConfig ports[kPorts];
 };
 

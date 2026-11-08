@@ -55,6 +55,14 @@ void Judge::load(const std::vector<ddr::Note>& notes, int lanes, const Options& 
   opt_ = opt;
   lanes_ = std::min(std::max(lanes, 0), kMaxLanes);
   for (const ddr::Note& n : notes) {
+    if (n.judgable && n.type == ddr::NoteType::Mine && n.lane >= 0 && n.lane < lanes_) {
+      MineState m;
+      m.time = n.time;
+      m.row = n.row;
+      m.lane = n.lane;
+      mines_.push_back(m);
+      continue;
+    }
     if (!IsJudged(n) || n.lane < 0 || n.lane >= lanes_) continue;
     NoteState s;
     s.time = n.time;
@@ -63,6 +71,7 @@ void Judge::load(const std::vector<ddr::Note>& notes, int lanes, const Options& 
     s.end_row = n.IsHold() ? n.endRow : n.row;
     s.lane = n.lane;
     s.hold = n.IsHold();
+    s.roll = n.type == ddr::NoteType::RollHead;
     if (rows_.empty() || notes_.back().row != n.row) {
       Row r;
       r.first = static_cast<int>(notes_.size());
@@ -75,6 +84,8 @@ void Judge::load(const std::vector<ddr::Note>& notes, int lanes, const Options& 
     if (s.hold) holds_total_++;
     notes_.push_back(s);
   }
+  std::stable_sort(mines_.begin(), mines_.end(),
+                   [](const MineState& a, const MineState& b) { return a.time < b.time; });
   score_.possible_points =
       static_cast<int>(rows_.size()) * kMaxRowPoints + static_cast<int>(holds_total_) * kHoldPoints;
 }
@@ -83,11 +94,26 @@ void Judge::press(int lane, double t) {
   update(t);
   if (lane < 0 || lane >= lanes_) return;
   down_[lane] = true;
+  down_since_[lane] = t;
 
-  // Pressing again during a hold in this lane grabs it back.
+  // The closest pending mine in the lane within the mine window, if any.
+  int mine = -1;
+  double mine_err = 0;
+  for (size_t k = mine_next_; k < mines_.size() && mines_[k].time <= t + opt_.windows.mine; k++) {
+    const MineState& m = mines_[k];
+    const double err = t - m.time;
+    if (m.state != MineState::kPending || m.lane != lane || std::fabs(err) > opt_.windows.mine) continue;
+    if (mine < 0 || std::fabs(err) < std::fabs(mine_err)) {
+      mine = static_cast<int>(k);
+      mine_err = err;
+    }
+  }
+
+  // Pressing again during a hold in this lane grabs it back; during a roll it's the re-press.
   for (ActiveHold& h : active_) {
     if (notes_[h.note].lane == lane) {
-      h.released_at = -1;
+      h.released_at = notes_[h.note].roll ? t : -1;
+      if (mine >= 0) hitMine(mine);
       return;
     }
   }
@@ -108,6 +134,11 @@ void Judge::press(int lane, double t) {
       best = list[k];
       best_err = err;
     }
+  }
+  // As in StepMania, a step takes whichever is closer, the note or the mine.
+  if (mine >= 0 && (best < 0 || std::fabs(mine_err) < std::fabs(best_err))) {
+    hitMine(mine);
+    return;
   }
   if (best < 0) return;   // a stray press
 
@@ -132,11 +163,26 @@ void Judge::release(int lane, double t) {
   update(t);
   if (lane < 0 || lane >= lanes_) return;
   down_[lane] = false;
-  for (ActiveHold& h : active_)
-    if (notes_[h.note].lane == lane && h.released_at < 0) h.released_at = t;
+  for (ActiveHold& h : active_)   // rolls track presses, not releases
+    if (notes_[h.note].lane == lane && !notes_[h.note].roll && h.released_at < 0) h.released_at = t;
 }
 
 void Judge::update(double t) {
+  // Mines up to t: hit if the lane is down as they pass (down_ is exact here: press and
+  // release update to their own time first), avoided once past the mine window.
+  for (size_t k = mine_next_; k < mines_.size() && mines_[k].time <= t; k++) {
+    MineState& m = mines_[k];
+    if (m.state != MineState::kPending) continue;
+    if (down_[m.lane] && down_since_[m.lane] <= m.time) {   // already down when it passed
+      hitMine(static_cast<int>(k));
+    } else if (t > m.time + opt_.windows.mine) {
+      m.state = MineState::kAvoided;
+      score_.mines_avoided++;
+      mines_done_++;
+    }
+  }
+  while (mine_next_ < mines_.size() && mines_[mine_next_].state != MineState::kPending) mine_next_++;
+
   // Rows whose notes are past the Boo window: unhit notes get their early grade or Miss.
   while (row_next_ < rows_.size()) {
     const Row& r = rows_[row_next_];
@@ -160,10 +206,11 @@ void Judge::update(double t) {
   }
 
   // Holds: let go if released for longer than hold_ok before the tail, else OK at the tail.
+  // Rolls: released_at is the last press; let go if the next one is later than roll_ok.
   for (size_t k = 0; k < active_.size();) {
     const ActiveHold h = active_[k];
     const NoteState& n = notes_[h.note];
-    const double drop = h.released_at + opt_.windows.hold_ok;
+    const double drop = h.released_at + (n.roll ? opt_.windows.roll_ok : opt_.windows.hold_ok);
     HoldResult res = HoldResult::None;
     if (h.released_at >= 0 && drop < n.end_time && t >= drop)
       res = HoldResult::LetGo;
@@ -193,7 +240,7 @@ void Judge::judgeNote(int i, Grade g, double offset, double t) {
     if (g == Grade::Miss)
       finishHold(i, HoldResult::LetGo);
     else
-      active_.push_back({i, down_[n.lane] ? -1.0 : t});
+      active_.push_back({i, n.roll ? t : (down_[n.lane] ? -1.0 : t)});
   }
 
   Row& r = rows_[n.row_index];
@@ -228,11 +275,22 @@ void Judge::finishHold(int i, HoldResult h) {
   events_.push_back({JudgeEvent::kHold, n.grade, h, n.lane, n.row, 0});
 }
 
+void Judge::hitMine(int k) {
+  MineState& m = mines_[k];
+  m.state = MineState::kHit;
+  score_.mines_hit++;
+  mines_done_++;
+  events_.push_back({JudgeEvent::kMine, Grade::None, HoldResult::None, m.lane, m.row, 0});
+}
+
 std::vector<AutoStep> MakeAutoplay(const Judge& judge) {
   const std::vector<Judge::NoteState>& notes = judge.notes();
+  const std::vector<Judge::MineState>& mines = judge.mines();
+  const double mine_w = judge.options().windows.mine;
   std::vector<AutoStep> steps;
   steps.reserve(notes.size() * 2);
-  // Next note's time per lane, to release a tap before the lane's next note.
+  // Per note, the time its lane must be free again: the lane's next note, or a mine's
+  // window. Walk backwards keeping the next note time and next mine time per lane.
   std::vector<double> next(notes.size(), 1e300);
   std::vector<double> lane_next(Judge::kMaxLanes, 1e300);
   for (size_t k = notes.size(); k-- > 0;) {
@@ -241,8 +299,26 @@ std::vector<AutoStep> MakeAutoplay(const Judge& judge) {
   }
   for (size_t k = 0; k < notes.size(); k++) {
     const Judge::NoteState& n = notes[k];
+    auto it = std::upper_bound(mines.begin(), mines.end(), n.time,
+                               [](double t, const Judge::MineState& m) { return t < m.time; });
+    for (; it != mines.end() && it->time - mine_w < next[k]; ++it)
+      if (it->lane == n.lane) {
+        next[k] = it->time - mine_w;
+        break;
+      }
+  }
+  for (size_t k = 0; k < notes.size(); k++) {
+    const Judge::NoteState& n = notes[k];
     steps.push_back({n.time, n.lane, true});
-    const double up = n.hold ? n.end_time : n.time + std::min(0.05, (next[k] - n.time) / 2);
+    if (n.roll) {   // tap through the roll every 0.1 s
+      double t = n.time;
+      while (t + 0.1 < n.end_time) {
+        steps.push_back({t + 0.05, n.lane, false});
+        t += 0.1;
+        steps.push_back({t, n.lane, true});
+      }
+    }
+    const double up = n.hold ? n.end_time : n.time + std::max(0.001, std::min(0.05, (next[k] - n.time) / 2));
     steps.push_back({up, n.lane, false});
   }
   std::stable_sort(steps.begin(), steps.end(), [](const AutoStep& a, const AutoStep& b) {

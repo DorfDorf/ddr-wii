@@ -35,6 +35,7 @@ constexpr float kPaneX[Session::kMaxPlayers] = {kLeftX, kWheelX};
 constexpr float kPaneW = 264;
 constexpr float kGlyph = render::Font::kGlyphW;
 
+constexpr double kMinSpeed = 0.25, kMaxSpeed = 8.0, kSpeedStep = 0.25;   // ITG x-mods
 constexpr u64 kRepeatDelayUs = 400000, kRepeatUs = 80000;   // held Left/Right
 
 constexpr const char* kStartFolder = "Click 120";   // the hardware checklist's test song
@@ -171,6 +172,7 @@ void SongSelect::handleInput() {
         if ((int)players.size() >= Session::kMaxPlayers) continue;
         SessionPlayer np;
         np.port = port;
+        np.speed = session_.config.ports[port].scrollSpeed;
         if (!players.empty()) np.preferred = players[0].preferred;
         players.push_back(np);
         pickCharts();
@@ -179,7 +181,9 @@ void SongSelect::handleInput() {
 
     // Debug: Y on port 1 adds an autoplay player on a free port, or removes it.
     if (down0 & PAD_BUTTON_Y) {
-        auto it = std::find_if(players.begin(), players.end(), [](const SessionPlayer& p) { return p.autoplay; });
+        // Only the extra test player (autoplay on a port other than 1), never P1 on autoplay.
+        auto it = std::find_if(players.begin(), players.end(),
+                               [](const SessionPlayer& p) { return p.autoplay && p.port != 0; });
         if (it != players.end()) {
             players.erase(it);
         } else if ((int)players.size() < Session::kMaxPlayers) {
@@ -189,6 +193,7 @@ void SongSelect::handleInput() {
                 if (used) continue;
                 SessionPlayer np;
                 np.port = port;
+                np.speed = session_.config.ports[port].scrollSpeed;
                 np.autoplay = true;
                 np.preferred = players.empty() ? ddr::Difficulty::Easy : players[0].preferred;
                 players.push_back(np);
@@ -202,7 +207,9 @@ void SongSelect::handleInput() {
         return;
     }
 
-    // Per player: difficulty, autoplay, leave. Wheel and START from any joined human port.
+    if (players.empty() && (down0 & PAD_BUTTON_B)) back_ = true;
+
+    // Per player: difficulty, speed, autoplay, leave. Wheel and START from any joined human port.
     const ddr::SongEntry* s = session_.chosen();
     int dir = 0, held_dir = 0;
     bool start = false;
@@ -210,7 +217,16 @@ void SongSelect::handleInput() {
         SessionPlayer& p = players[i];
         if (p.autoplay && p.port != 0) continue;   // a debug autoplay player has no pad
         const u16 d = input_.down(p.port), h = input_.held(p.port);
-        if (s && !s->charts.empty()) {
+        if (h & PAD_BUTTON_A) {   // A held: Up/Down set the scroll speed (saved per port)
+            double sp = p.speed;
+            if (d & PAD_BUTTON_UP) sp = std::min(kMaxSpeed, sp + kSpeedStep);
+            if (d & PAD_BUTTON_DOWN) sp = std::max(kMinSpeed, sp - kSpeedStep);
+            if (sp != p.speed) {
+                p.speed = sp;
+                session_.config.ports[p.port].scrollSpeed = sp;
+                session_.config_dirty = true;
+            }
+        } else if (s && !s->charts.empty()) {
             const int n = (int)s->charts.size();
             int c = p.chart;
             if (d & PAD_BUTTON_UP) c = std::max(0, c - 1);
@@ -225,7 +241,8 @@ void SongSelect::handleInput() {
         if (d & PAD_BUTTON_RIGHT) dir = 1;
         if (h & PAD_BUTTON_LEFT) held_dir = -1;
         if (h & PAD_BUTTON_RIGHT) held_dir = 1;
-        if ((d & (PAD_BUTTON_START | PAD_BUTTON_A)) && !(h & PAD_TRIGGER_Z)) start = true;
+        if ((d & PAD_BUTTON_START) && !(h & PAD_TRIGGER_Z)) start = true;
+        if (d & PAD_BUTTON_B) back_ = true;
         if (d & PAD_BUTTON_X) {
             players.erase(players.begin() + i);
             return;
@@ -265,7 +282,7 @@ bool SongSelect::frame() {
     draw();
     const u16 held = input_.held(0);
     quit_frames_ = ((held & PAD_BUTTON_START) && (held & PAD_TRIGGER_Z)) ? quit_frames_ + 1 : 0;
-    return !picked_ && !calibrate_ && quit_frames_ < 120;
+    return !picked_ && !calibrate_ && !back_ && quit_frames_ < 120;
 }
 
 // ---------------------------------------------------------------------------
@@ -281,7 +298,8 @@ void SongSelect::draw() {
     render::rect(0, 0, video_.width(), 46, 0x000000A0);   // header bar
     drawWheel();
     GRRLIB_SetAntiAliasing(false);
-    font_.print(kLeftX, 24, kWhite, 1, "SELECT MUSIC");
+    font_.print(kLeftX, 24, kWhite, 1, "SELECT MUSIC  %s",
+                session_.config.playMode == ddr::PlayMode::Competitive ? "COMPETITIVE" : "CASUAL");
     char buf[48];
     std::snprintf(buf, sizeof buf, "%d songs  scan %lu ms", (int)session_.library.SongCount(),
                   (unsigned long)(session_.scan_us / 1000));
@@ -292,7 +310,7 @@ void SongSelect::draw() {
     if (!session_.message.empty())
         font_.print(kLeftX, 436, 0xFFC040FF, 1, "%s", session_.message.c_str());
     else
-        font_.print(kLeftX, 436, kGrey, 1, "offset %+.1f ms R calibrate  Z auto  Y P2  X leave",
+        font_.print(kLeftX, 436, kGrey, 1, "offset %+.1f ms  A+Up/Down speed  R calibrate  B back",
                     session_.config.globalOffsetS * 1000);
     if (!session_.scanned)
         font_.print(kLeftX, 200, 0xFF5050FF, 1, "can't open sd:/ddrwii/songs");
@@ -387,13 +405,14 @@ void SongSelect::drawPane(int slot, const ddr::SongEntry* s) {
     font_.print(x + 8, y + 6, kBlack, 1, "%s", buf);
     if (!c) {
         font_.print(x + 8, y + 30, kBlack, 1, "%s", ddr::DifficultyToString(p.preferred));
+        font_.print(x + 8, y + 66, kBlack, 1, "Speed %.2fx", p.speed);
         return;
     }
     std::snprintf(buf, sizeof buf, "%s %d", ddr::DifficultyToString(c->difficulty), c->meter);
     font_.print(x + kPaneW - 8 - std::strlen(buf) * kGlyph, y + 6, kBlack, 1, "%s", buf);
     font_.print(x + 8, y + 30, kBlack, 1, "Steps %4d  Holds %3d", c->steps, c->holds);
     font_.print(x + 8, y + 48, kBlack, 1, "Jumps %4d  Mines %3d", c->jumps, c->mines);
-    font_.print(x + 8, y + 66, kBlack, 1, "Rolls %4d", c->rolls);
+    font_.print(x + 8, y + 66, kBlack, 1, "Rolls %4d  Speed %.2fx", c->rolls, p.speed);
 }
 
 // The music wheel: pack headers (grey) and the open pack's songs (dark), cursor row in the

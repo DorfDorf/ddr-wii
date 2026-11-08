@@ -55,10 +55,17 @@ void ParseConfig(const std::string& text, Config& out) {
   }
   if (GetNumber(ini, "Options", "InputDebounceMs", d) && d >= 0 && d <= 50)
     out.inputDebounceMs = (int)(d + 0.5);
+  if (ini.GetValue("Options", "PlayMode", s)) {
+    Trim(s);
+    if (EqualsNoCase(s, "Casual")) out.playMode = PlayMode::Casual;
+    if (EqualsNoCase(s, "Competitive")) out.playMode = PlayMode::Competitive;
+  }
   for (int p = 0; p < Config::kPorts; p++) {
     char section[8];
     std::snprintf(section, sizeof section, "Port%d", p + 1);
     if (GetNumber(ini, section, "InputOffset", d)) out.ports[p].inputOffsetS = ClampOffset(d / 1000.0);
+    if (GetNumber(ini, section, "ScrollSpeed", d) && d >= 0.25 && d <= 8)
+      out.ports[p].scrollSpeed = (int)(d * 4 + 0.5) / 4.0;   // steps of 0.25
   }
 }
 
@@ -75,8 +82,11 @@ std::string WriteConfigText(const Config& c) {
   t += c.defaultSyncOffset == DefaultSyncOffset::ITG ? "DefaultSyncOffset=ITG\n" : "DefaultSyncOffset=NULL\n";
   std::snprintf(buf, sizeof buf, "InputDebounceMs=%d\n", c.inputDebounceMs);
   t += buf;
+  t += "; Casual (no life bar) or Competitive (ITG life bar and failing)\n";
+  t += c.playMode == PlayMode::Competitive ? "PlayMode=Competitive\n" : "PlayMode=Casual\n";
   for (int p = 0; p < Config::kPorts; p++) {
-    std::snprintf(buf, sizeof buf, "\n[Port%d]\nInputOffset=%.1f\n", p + 1, c.ports[p].inputOffsetS * 1000.0);
+    std::snprintf(buf, sizeof buf, "\n[Port%d]\nInputOffset=%.1f\nScrollSpeed=%.2f\n", p + 1,
+                  c.ports[p].inputOffsetS * 1000.0, c.ports[p].scrollSpeed);
     t += buf;
   }
   return t;
