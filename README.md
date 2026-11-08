@@ -2,18 +2,26 @@
 
 A four-panel rhythm game (StepMania-style) for Nintendo Wii homebrew, played with a GameCube-port DDR dance pad. Developed and tested in Dolphin first, then on real hardware via the Homebrew Channel.
 
-**Status:** Milestone 1 (toolchain + pad test) is done: `tools/padtest` builds with devkitPPC and boots in Dolphin. Next: M2 (graphics) and M4a (chart parser on PC). See [doc 03](docs/03-development-environment.md) for the installed setup.
+**Status:** M1 (toolchain + pad test) and M2 (graphics) are done. `game/` boots into a GRRLIB render test (receptors, a time-driven arrow stream, frame-time overlay, sprite stress test) that holds full frame rate with 1600 sprites in Dolphin in NTSC, PAL60 and PAL50. Next: M3 (real dance mat on a real Wii) and M4a (chart parser on PC). See [doc 03](docs/03-development-environment.md) for the installed setup.
 
 ## Build
 
 From the devkitPro MSys2 shell (one-time setup: `tools/setup-devkitpro.sh`):
 
 ```bash
-make -C tools/padtest              # -> tools/padtest/padtest.dol
-make -C tools/padtest run-dolphin  # build and boot in Dolphin
+make -C game                       # -> game/game.dol
+make -C game run-dolphin           # build and boot in Dolphin
+make -C tools/padtest run-dolphin  # pad diagnostic (doc 04)
 ```
 
-Or use the VS Code tasks (`Ctrl+Shift+B` builds padtest).
+Dolphin settings can be overridden per run, e.g. to test other TV modes:
+
+```bash
+make -C game run-dolphin DOLPHIN_ARGS="-C Dolphin.Core.FallbackRegion=1"                              # NTSC
+make -C game run-dolphin DOLPHIN_ARGS="-C Dolphin.Core.FallbackRegion=2 -C SYSCONF.IPL.E60=False"     # PAL50
+```
+
+Or use the VS Code tasks: `Ctrl+Shift+B` builds the game, and *Run Test Task* boots it in Dolphin.
 
 ## Plan in one paragraph
 

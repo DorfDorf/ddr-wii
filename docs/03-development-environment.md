@@ -11,7 +11,9 @@
 | Official template | Installed by `wii-examples` at `C:\devkitPro\examples\wii\templates\makefile\application` (not `templates/makefile`). Built from a copy in `build-experiments/template/` (gitignored) |
 | Dolphin | **2609a** portable 7z, unpacked to `C:\Users\haler\Dolphin-x64` with `portable.txt` (user folder = `Dolphin-x64\User`). winget only has 5.0 (2016), so don't use it. The first launch shows an *Allow Usage Statistics Reporting* dialog (answered No) |
 | Build + run | `make -C tools/padtest run-dolphin` → [`tools/run-dolphin.sh`](../tools/run-dolphin.sh). It kills any open Dolphin, then boots the `.dol` with `-b -e` through `cmd /c start` so make returns at once. Edit → build → launch takes about 1 s. `DOLPHIN=/path/to/Dolphin.exe` overrides the default location |
-| VS Code | `.vscode/tasks.json` (padtest: build / run in Dolphin / clean / send to Wii) and `c_cpp_properties.json` |
+| VS Code | `.vscode/tasks.json`: game build (the default build task), run in Dolphin (default test task, plus NTSC and PAL50 variants), clean and send to Wii, and the same for padtest. Also `c_cpp_properties.json`. Compiler errors print MSys2 paths (`/home/haler/...`), so clicking them in the Problems panel may not open the file |
+| Dolphin TV modes | Per-run overrides with `DOLPHIN_ARGS` (passed through `run-dolphin.sh`): `-C Dolphin.Core.FallbackRegion=1` = NTSC-U (480i, 59.94 Hz). With the default region (PAL on this PC) you get PAL60 (EuRGB60, 480 lines). Adding `-C SYSCONF.IPL.E60=False` gives PAL50 (528 lines, 50 Hz). Region values: 0 NTSC-J, 1 NTSC-U, 2 PAL |
+| Dolphin analytics | `run-dolphin.sh` force-kills the previous instance, so Dolphin never saved the answer to the first-run analytics prompt. It is set by hand in `User/Config/Dolphin.ini` (`[Analytics] PermissionAsked = True`, `Enabled = False`) |
 
 Paths in the rest of this guide that say `C:/Program Files/Dolphin` should read `C:/Users/haler/Dolphin-x64`.
 
