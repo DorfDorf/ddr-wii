@@ -61,6 +61,17 @@ u32 withAlpha(u32 rgba, float a) {
 
 u64 cpuUs() { return ticks_to_microsecs(gettime()); }
 
+// Grade colours: stars gold, S cyan, A green, B blue, C purple, D grey, failed red.
+u32 tierColour(int tier) {
+    if (tier == 0) return 0xFF4040FF;
+    if (tier <= 4) return 0xFFE060FF;
+    if (tier <= 7) return 0x80F0FFFF;
+    if (tier <= 10) return 0x60F060FF;
+    if (tier <= 13) return 0x60A0FFFF;
+    if (tier <= 16) return 0xC070FFFF;
+    return 0xB0B0B0FF;
+}
+
 const game::Grade kShown[] = {game::Grade::Marvelous, game::Grade::Perfect, game::Grade::Great,
                               game::Grade::Good, game::Grade::Boo, game::Grade::Miss};
 
@@ -72,8 +83,9 @@ void printCentred(const render::Font& font, float cx, float y, u32 colour, float
 }  // namespace
 
 Gameplay::Gameplay(wii::Video& video, const wii::Input& input, const render::ArrowArt& art,
-                   const render::Font& font, const Session& session)
-    : video_(video), input_(input), art_(art), font_(font), offset_s_(session.config.globalOffsetS) {
+                   const render::Font& font, Session& session)
+    : video_(video), input_(input), art_(art), font_(font), session_(session),
+      offset_s_(session.config.globalOffsetS) {
     if (loadSong(session)) start();
 }
 
@@ -102,6 +114,11 @@ bool Gameplay::loadSong(const Session& session) {
             return false;
         }
         p.chart = ci;
+        p.score_key = game::ChartKey(session.config.playMode, *entry, entry->charts[sp.chart]);
+        if (const game::HighScoreEntry* best = session.scores.find(p.score_key)) {
+            p.had_best = true;
+            p.prev_best = best->best;
+        }
         players_.push_back(std::move(p));
     }
     competitive_ = session.config.playMode == ddr::PlayMode::Competitive;
@@ -148,6 +165,18 @@ void Gameplay::stop(State next) {
     state_ = next;
 }
 
+void Gameplay::finish() {
+    stop(State::Done);
+    for (Player& p : players_) {
+        if (p.autoplay) continue;
+        const game::Score& s = p.judge.score();
+        p.new_best = session_.scores.submit(p.score_key,
+                                            game::HighScore{s.percentX100(), p.failed, s.max_combo});
+        session_.scores_dirty = true;
+    }
+    recorded_ = true;
+}
+
 bool Gameplay::frame() {
     const u16 held = input_.held(0);
     const u64 now_us = cpuUs();
@@ -189,8 +218,9 @@ bool Gameplay::frame() {
                 if (all_failed && !all_failed_us_) all_failed_us_ = now_us;
                 // Audio over: keep chart time running on the CPU clock (M4c open item 1).
                 if (stream_.stats().finished) clock_.freeRun();
-                if (all_done && chart_s_ >= end_s_) stop(State::Done);
-                if (all_failed_us_ && now_us - all_failed_us_ > kFailedEndUs) stop(State::Done);
+                if ((all_done && chart_s_ >= end_s_) ||
+                    (all_failed_us_ && now_us - all_failed_us_ > kFailedEndUs))
+                    finish();
             }
         }
     } else {
@@ -449,21 +479,40 @@ void Gameplay::drawResults() {
         const float x = p.centre_x - 88;
         char buf[32];
         printCentred(font_, p.centre_x, 92, p.autoplay ? warn : grey, 1, playerLabel(p).c_str());
+        const int tier = game::GradeTier(s.percentX100(), p.failed);
+        printCentred(font_, p.centre_x, 106, tierColour(tier), 3,
+                     p.failed ? "FAILED" : game::GradeTierName(tier));
         std::snprintf(buf, sizeof buf, "%.2f%%", s.percent());
-        printCentred(font_, p.centre_x, 112, p.failed ? 0xFF4040FF : white, 3, buf);
-        if (p.failed) printCentred(font_, p.centre_x, 162, 0xFF4040FF, 1, "FAILED");
-        float y = 182;
+        printCentred(font_, p.centre_x, 156, p.failed ? 0xFF4040FF : white, 2, buf);
+        char rec[48];
+        u32 rec_colour = grey;
+        if (p.autoplay) {
+            std::snprintf(rec, sizeof rec, "autoplay, not saved");
+        } else if (!recorded_) {
+            std::snprintf(rec, sizeof rec, "stopped, not saved");
+        } else if (p.new_best && p.had_best) {
+            std::snprintf(rec, sizeof rec, "New best! (was %.2f%%)", p.prev_best.percent_x100 / 100.0);
+            rec_colour = 0xFFE060FF;
+        } else if (p.new_best) {
+            std::snprintf(rec, sizeof rec, "New best!");
+            rec_colour = 0xFFE060FF;
+        } else {
+            std::snprintf(rec, sizeof rec, "best %.2f%% %s", p.prev_best.percent_x100 / 100.0,
+                          game::GradeTierName(p.prev_best.tier()));
+        }
+        printCentred(font_, p.centre_x, 190, rec_colour, 1, rec);
+        float y = 210;
         for (game::Grade g : kShown) {
             font_.print(x, y, gradeColour(g), 1, "%-10s%5d", game::GradeName(g), s.rows[(int)g]);
             y += 16;
         }
-        font_.print(x, y + 8, white, 1, "%-10s%5d", "Held", s.holds_held);
-        font_.print(x, y + 24, white, 1, "%-10s%5d", "Let go", s.holds_let_go);
-        font_.print(x, y + 40, white, 1, "%-10s%5d", "Mines hit", s.mines_hit);
-        font_.print(x, y + 56, white, 1, "%-10s%5d", "Max combo", s.max_combo);
-        font_.print(x, y + 80, grey, 1, "mean %+6.1f ms", s.meanOffset() * 1000);
-        font_.print(x, y + 96, grey, 1, "sd   %6.1f ms", s.offsetStdDev() * 1000);
-        if (s.held_misses) font_.print(x, y + 112, warn, 1, "held misses %d", s.held_misses);
+        font_.print(x, y, white, 1, "%-10s%5d", "Held", s.holds_held);
+        font_.print(x, y + 16, white, 1, "%-10s%5d", "Let go", s.holds_let_go);
+        font_.print(x, y + 32, white, 1, "%-10s%5d", "Mines hit", s.mines_hit);
+        font_.print(x, y + 48, white, 1, "%-10s%5d", "Max combo", s.max_combo);
+        font_.print(x, y + 66, grey, 1, "mean %+6.1f ms", s.meanOffset() * 1000);
+        font_.print(x, y + 82, grey, 1, "sd   %6.1f ms", s.offsetStdDev() * 1000);
+        if (s.held_misses) font_.print(x, y + 98, warn, 1, "held misses %d", s.held_misses);
     }
     font_.print(64, 416, grey, 1, "A/START back");
 }

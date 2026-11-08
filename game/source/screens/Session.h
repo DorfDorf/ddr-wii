@@ -11,6 +11,7 @@
 
 #include "core/chart/Chart.h"
 #include "core/config/Config.h"
+#include "core/game/HighScores.h"
 #include "core/songs/SongLibrary.h"
 
 namespace screens {
@@ -39,6 +40,8 @@ struct Session {
     bool config_loaded = false;             // false: no config.ini yet (defaults)
     bool config_dirty = false;              // changed since the last save (main.cpp saves it)
     std::string message;                    // one-line note for song select (e.g. "offset saved")
+    game::HighScoreTable scores;            // scores.txt: machine bests per chart and mode
+    bool scores_dirty = false;              // Gameplay recorded a play (main.cpp saves it)
 
     const ddr::SongEntry* chosen() const {
         if (pack < 0 || pack >= (int)library.packs.size()) return nullptr;

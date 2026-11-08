@@ -43,6 +43,7 @@
 #include "../source/core/config/Config.h"
 #include "../source/core/game/Calibration.h"
 #include "../source/core/game/LifeMeter.h"
+#include "../source/core/game/HighScores.h"
 
 using namespace ddr;
 
@@ -906,12 +907,18 @@ static void TestJudge() {
   using game::Judge;
   const game::Windows w;
   CHECK(game::GradeForError(0.0, w) == Grade::Marvelous);
-  CHECK(game::GradeForError(0.0225, w) == Grade::Marvelous);
-  CHECK(game::GradeForError(0.0226, w) == Grade::Perfect);
-  CHECK(game::GradeForError(0.090, w) == Grade::Great);
-  CHECK(game::GradeForError(0.135, w) == Grade::Good);
-  CHECK(game::GradeForError(0.180, w) == Grade::Boo);
-  CHECK(game::GradeForError(0.181, w) == Grade::None);
+  // ITG's windows (Simply Love ITG mode + 1.5 ms).
+  CHECK(game::GradeForError(0.0230, w) == Grade::Marvelous);
+  CHECK(game::GradeForError(0.0231, w) == Grade::Perfect);
+  CHECK(game::GradeForError(0.0445, w) == Grade::Perfect);
+  CHECK(game::GradeForError(0.0446, w) == Grade::Great);
+  CHECK(game::GradeForError(0.095, w) == Grade::Great);    // a Good with StepMania's windows
+  CHECK(game::GradeForError(0.1035, w) == Grade::Great);
+  CHECK(game::GradeForError(0.1036, w) == Grade::Good);
+  CHECK(game::GradeForError(0.1365, w) == Grade::Good);
+  CHECK(game::GradeForError(0.1366, w) == Grade::Boo);
+  CHECK(game::GradeForError(0.1815, w) == Grade::Boo);
+  CHECK(game::GradeForError(0.1816, w) == Grade::None);
 
   {  // Closest note: a press between two close notes takes the nearer, the other misses.
     Judge j;
@@ -976,9 +983,9 @@ static void TestJudge() {
     j.press(1, 2.05);
     CHECK(j.score().rows[(int)Grade::Great] == 1 && j.score().combo == 1);
     CHECK(j.finished());
-    // Points: Boo row 0 + Great row 1 out of 2 rows x 2.
-    CHECK(j.score().dance_points == 1 && j.score().possible_points == 4);
-    CHECK_NEAR(j.score().percent(), 25.0, 1e-9);
+    // Points (ITG weights): Boo row -6 + Great row 2 out of 2 rows x 5; the % stops at 0.
+    CHECK(j.score().dance_points == -4 && j.score().possible_points == 10);
+    CHECK_NEAR(j.score().percent(), 0.0, 1e-9);
     CHECK(j.score().hits == 3);
   }
   {  // Holds: a short release is fine, a long one lets go, a missed head is NG.
@@ -989,9 +996,9 @@ static void TestJudge() {
     j.release(0, 1.5);
     j.press(0, 1.7);    // released for 0.2 s: still OK
     j.release(1, 2.0);  // released for good
-    j.update(2.24);
+    j.update(2.32);     // the hold window is 0.3215 s
     CHECK(j.notes()[1].hold_result == HoldResult::None);
-    j.update(2.26);
+    j.update(2.33);
     CHECK(j.notes()[1].hold_result == HoldResult::LetGo);
     CHECK(j.notes()[2].hold_result == HoldResult::LetGo);   // head missed
     CHECK(!j.finished());
@@ -1235,6 +1242,98 @@ static void TestCalibration() {
   CHECK_NEAR(c.mean(), 0.0, 1e-12);
 }
 
+static void TestScoresAndGrades(const std::string& dir) {
+  std::printf("[unit] ITG dance points, grades, high scores\n");
+  using game::Grade;
+  using game::HighScore;
+  using game::Judge;
+  {  // Weights: W1 5, W2 4, W3 2, W4 0, W5 -6, Miss -12, held 5, mine -6; 5 per row/hold.
+    Judge j;
+    j.load({JNote(0, 1.0, 0), JNote(48, 2.0, 1), JNote(96, 3.0, 2), JNote(144, 4.0, 3, 5.0),
+            JMine(192, 6.0, 0)}, 4);
+    j.press(0, 1.0);     // W1 +5
+    j.press(1, 2.03);    // W2 +4
+    j.press(2, 3.06);    // W3 +2
+    j.press(3, 4.0);     // W1 +5, then held +5
+    j.update(5.5);
+    j.press(0, 6.0);     // mine -6
+    j.update(7.0);
+    CHECK(j.finished());
+    CHECK(j.score().possible_points == 25);
+    CHECK(j.score().dance_points == 15);
+    CHECK(j.score().percentX100() == 6000);
+  }
+  {  // The % is truncated, not rounded: 2/3 is 66.66%, and anything short of all is < 100%.
+    game::Score s;
+    s.possible_points = 3;
+    s.dance_points = 2;
+    CHECK(s.percentX100() == 6666);
+    s.possible_points = 100000;
+    s.dance_points = 99999;
+    CHECK(s.percentX100() == 9999);
+    s.dance_points = -50;
+    CHECK(s.percentX100() == 0);
+  }
+  // Simply Love's tiers.
+  CHECK(game::GradeTier(10000, false) == 1);
+  CHECK(game::GradeTier(9999, false) == 2);
+  CHECK(game::GradeTier(9900, false) == 2);
+  CHECK(game::GradeTier(9400, false) == 5);
+  CHECK(std::string(game::GradeTierName(game::GradeTier(9400, false))) == "S+");
+  CHECK(std::string(game::GradeTierName(game::GradeTier(8299, false))) == "A-");
+  CHECK(std::string(game::GradeTierName(game::GradeTier(5500, false))) == "C-");
+  CHECK(std::string(game::GradeTierName(game::GradeTier(5499, false))) == "D");
+  CHECK(std::string(game::GradeTierName(game::GradeTier(10000, true))) == "F");
+
+  // Better: passed before failed, then the higher %.
+  HighScore pass{7000, false, 10}, fail{9000, true, 50}, high{7100, false, 5};
+  CHECK(game::Better(pass, fail) && !game::Better(fail, pass));
+  CHECK(game::Better(high, pass) && !game::Better(pass, pass));
+
+  // Keys name the song by its last two folders.
+  ddr::SongEntry song;
+  song.dir = "sd:/ddrwii/songs/My Pack/My Song/";
+  ddr::ChartInfo chart;
+  chart.difficulty = ddr::Difficulty::Edit;
+  chart.description = "tab\there";
+  const std::string key = game::ChartKey(ddr::PlayMode::Competitive, song, chart);
+  CHECK(key == "Competitive\tMy Pack/My Song\tEdit\ttab here");
+  song.dir = "C:/elsewhere/songs/My Pack/My Song/";
+  CHECK(game::ChartKey(ddr::PlayMode::Competitive, song, chart) == key);
+  CHECK(game::ChartKey(ddr::PlayMode::Casual, song, chart) != key);
+
+  game::HighScoreTable t;
+  CHECK(t.submit(key, fail));            // first play: the best, even failed
+  CHECK(t.submit(key, pass));            // a pass beats a failed 90%
+  CHECK(!t.submit(key, HighScore{6000, false, 99}));
+  CHECK(t.find(key)->best.percent_x100 == 7000 && t.find(key)->best.max_combo == 10);
+  CHECK(t.find(key)->plays == 3 && t.find(key)->clears == 2);
+  chart.difficulty = ddr::Difficulty::Hard;
+  chart.description.clear();
+  const std::string key2 = game::ChartKey(ddr::PlayMode::Casual, song, chart);
+  CHECK(t.submit(key2, HighScore{10000, false, 300}));
+  CHECK(t.find("nope") == nullptr);
+
+  // Write, read back; junk lines are skipped.
+  game::HighScoreTable u;
+  u.parse(t.write() + "junk\nCasual\tA/B\tHard\t\t100\t0\t1\t0\t0\n"
+          "Casual\tA/B\tNotADifficulty\t\t100\t0\t1\t1\t1\r\n");
+  CHECK(u.size() == 2);
+  CHECK(u.find(key) && u.find(key)->best.percent_x100 == 7000 && u.find(key)->plays == 3);
+  CHECK(u.find(key2) && u.find(key2)->best.percent_x100 == 10000 &&
+        u.find(key2)->best.max_combo == 300 && !u.find(key2)->best.failed);
+
+  const std::string path = dir + "/build/scores-test.txt";
+  std::remove(path.c_str());
+  game::HighScoreTable none;
+  CHECK(!game::LoadHighScores(path, none));
+  CHECK(game::SaveHighScores(path, t));
+  CHECK(game::SaveHighScores(path, t));
+  game::HighScoreTable v;
+  CHECK(game::LoadHighScores(path, v) && v.size() == 2);
+  std::remove(path.c_str());
+}
+
 int main(int argc, char** argv) {
   std::string dir = ".";
   int fuzzIterations = 3000;
@@ -1263,6 +1362,7 @@ int main(int argc, char** argv) {
   TestSongLibrary(dir);
   TestConfig(dir);
   TestCalibration();
+  TestScoresAndGrades(dir);
   RunFuzz(dir, fuzzIterations);
 
   std::printf("\n%d checks, %d failures%s\n", g_checks, g_failures,

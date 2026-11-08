@@ -87,19 +87,19 @@ double beatAtSeconds(double sec)  const;   // inverse; returns stop beat while i
 
 ### 3.4 Judgement
 
-Windows (StepMania defaults, verified in SM 3.9 `PrefsManager.cpp:87-92`), all as ± seconds from `noteTime`:
+Windows, all as ± seconds from `noteTime`. Since M5 step 5 these are ITG's: Simply Love's ITG mode (`Scripts/SL_Init.lua`) plus the 0.0015 `TimingWindowAdd` that ITGmania's `Player::GetWindowSeconds` adds to every window [src]. The StepMania defaults used before (SM 3.9 `PrefsManager.cpp:87-92`) are in brackets. The judgement names are still DDR's (ITG's in the second column):
 
 | Judgement | Window | Combo |
 |---|---|---|
-| Marvelous | 0.0225 | + |
-| Perfect | 0.045 | + |
-| Great | 0.090 | + |
-| Good | 0.135 | breaks (DDR rule) / configurable |
-| Boo | 0.180 | breaks |
-| Miss | note passes −0.180 unhit | breaks |
-| Hold OK/NG | release tolerance 0.250 (SM "OK" window) | — |
-| Roll OK/NG | at most 0.350 between presses (ITG `TimingWindowSecondsRoll`) | — |
-| Mine | a press within 0.070 of it (ITG `TimingWindowSecondsMine`) | — |
+| Marvelous (Fantastic) | 0.0230 (0.0225) | + |
+| Perfect (Excellent) | 0.0445 (0.045) | + |
+| Great (Great) | 0.1035 (0.090) | + |
+| Good (Decent) | 0.1365 (0.135) | breaks (DDR rule) / configurable |
+| Boo (Way Off) | 0.1815 (0.180) | breaks |
+| Miss | note passes −0.1815 unhit | breaks |
+| Hold OK/NG | release tolerance 0.3215 (0.250) | — |
+| Roll OK/NG | at most 0.3515 between presses | — |
+| Mine | a press within 0.0715 of it | — |
 
 - On each `LaneEvent(pressed, t)`: take the **closest unjudged note in that lane** with `|t − noteTime| ≤ BooWindow`. This fixes Dance Clone's known issue "a step between two very close arrows counts for the earlier arrow instead of the closest one" (`CHANGELOG v0.60`), which v0.68 still has (`Game.cpp:2595-2605`). A press for an incomplete jump must not fall through to a later note in the same lane.
 - **Early-hit rule** (ITGmania's fix for "way off towers", `27c6f7757a`; adapted from its `Player.cpp`):
@@ -114,9 +114,9 @@ Windows (StepMania defaults, verified in SM 3.9 `PrefsManager.cpp:87-92`), all a
   Tune the window from the bounce measured in M3.
 - **Held misses:** record when a note is missed while its lane is held down. It flags stuck or dead panels, as ITGmania does for pad debugging.
 - **Jumps:** notes on the same row are judged individually, but combo and score treat the row as one unit (worst judgement of the row). A row completes when all its lanes are hit or missed.
-- **Holds:** the head is judged like a tap. While held, the hold is OK. If released for longer than 0.250 s before the tail, it's NG.
+- **Holds:** the head is judged like a tap. While held, the hold is OK. If released for longer than the hold window (0.3215 s) before the tail, it's NG.
 - **Rolls (M5 step 4):** the head is judged like a tap. After that the lane must be pressed again at least every 0.350 s until the tail; holding it down doesn't count. The gap is the ITG roll window.
-- **Mines (M5 step 4):** a mine is hit if its lane was already down when it passed, or if a press lands within 0.070 s of it and the mine is closer than any note in that lane (as in StepMania, a step judges whichever is closer). Otherwise it's avoided. Mines only change life for now; dance points come with ITG's weights in step 5. Autoplay releases taps before a mine in the lane and taps through rolls every 0.1 s. It gives 100% Marvelous with no mine hit on all 45 corpus charts (64 mines).
+- **Mines (M5 step 4):** a mine is hit if its lane was already down when it passed, or if a press lands within 0.070 s of it and the mine is closer than any note in that lane (as in StepMania, a step judges whichever is closer). Otherwise it's avoided. A hit mine costs life and dance points (−6, §7) but not the combo. Autoplay releases taps before a mine in the lane and taps through rolls every 0.1 s. It gives 100% Marvelous with no mine hit on all 45 corpus charts (64 mines).
 - **Life (Competitive only, M5 step 4):** `core/game/LifeMeter`, ported from ITGmania v1.3.0 `LifeMeterBar` (normal drain), with Simply Love's ITG-mode values:
   - Start at 50%. Per row: Marvelous/Perfect +0.8%, Great +0.4%, Good 0, Boo −5%, Miss −10%.
   - Hold held +0.8%, let go −8%. A missed hold head costs nothing extra (the Miss row already counted). Mine −5%.
@@ -204,8 +204,9 @@ Options (scroll speed, global offset, calibration) reachable from Title.
 - **SongLibrary cache:** parsing headers for hundreds of songs from SD is slow, so cache `{path, mtime, title, artist, bpm range, difficulties}` in `sd:/ddrwii/cache.bin` **[exp: measure the scan time]**.
 - **Play mode (M5 step 4):** `screens/PlayModeSelect` comes before song select, modelled on Simply Love's ScreenSelectPlayMode, with the choices on the left and a description on the right. **Casual** has no life bar, and nobody fails. **Competitive** has ITG's life bar and failing (§3.4). Timing and scoring are the same in both. The choice is saved as `PlayMode` in `config.ini`. B in song select goes back to this screen, and B on port 1 here opens the test scenes.
 - **Scroll speed (M5 step 4):** ITG x-mods, 1x = 64 px per beat, 0.25x to 8x in 0.25x steps. In song select, hold A and press Up/Down on your own pad. The speed is shown in your pane and saved per port as `ScrollSpeed` in `config.ini`, so each mat keeps its own. Only START picks a song now (A no longer does).
-- **Scoring (prototype):** "dance points" percentage, as in StepMania/ITG (Marvelous/Perfect = 100%, Great = 50%, Good/Boo/Miss = 0, holds OK = full credit) plus max combo and judgement counts. DDR-style money score can be added later (SM 3.9 `ScoreKeeperMAX2.cpp` as reference).
-- **High scores:** `scores.dat` is a small versioned binary or INI keyed by `songHash + difficulty`, storing the best percentage, combo and grade. It's written atomically (write a temp file, then rename).
+- **Scoring (M5 step 5):** ITG dance points, with Simply Love's ITG-mode weights (`Scripts/SL_Init.lua`), the same in both play modes. Per row (a jump counts once, with its worst grade): Marvelous 5, Perfect 4, Great 2, Good 0, Boo −6, Miss −12. A held hold or roll 5, let go 0. A hit mine −6. The most a chart gives is 5 per row plus 5 per hold or roll. The % is the points over that, clamped to 0–100% and truncated (not rounded) to 0.01%, so 99.999% shows as 99.99%. The timing windows are ITG's too (§3.4), so a play should score the same % as in ITGmania's ITG mode. A DDR-style money score can come later (SM 3.9 `ScoreKeeperMAX2.cpp` as reference).
+- **Grades (M5 step 5):** Simply Love's 17 tiers (`metrics.ini` `GradePercentTier01-17`): 100% four stars, 99% three, 98% two, 96% one, then S+ 94, S 92, S− 89, A+ 86, A 83, A− 80, B+ 76, B 72, B− 68, C+ 64, C 60, C− 55, and D below that. A failed play is F. The stars are drawn as `*` until there's art.
+- **High scores (M5 step 5):** `core/game/HighScores` keeps the machine's best per chart and play mode in `sd:/ddrwii/scores.txt`. It's a text file with one tab-separated line per chart: mode, `<pack>/<song>` folder, difficulty, description, % ×100, failed, max combo, plays, clears. Lines that don't parse are skipped. It's written whole through a temp file and a rename, like `config.ini`. A passed score beats a failed one, then the higher % wins. Casual and Competitive are kept apart, since Casual can't fail. The song is keyed by its last two folders, not a hash, so moving the songs root keeps the scores, but renaming a song folder starts it over. Only songs that play out (or that everyone failed) are recorded. A song stopped with START isn't, and autoplay players never are. The results show the grade (or FAILED), the % and "New best!" or the old best. Each song-select pane shows the best and its grade for the player's chart in the current mode. There are no names or profiles yet.
 - **Settings:** `config.ini` holds `GlobalOffset`, `VisualOffset`, `DefaultSyncOffset` (`NULL` or `ITG`, for packs without `pack.ini`), `InputDebounceMs`, and per port (`[Port1]`…`[Port4]`) `LaneMap`, `InputOffset` and the last-used `ScrollSpeed`. See §11 for how ports become players. **Built (M5 step 3):** `core/config/Config` reads and writes `sd:/ddrwii/config.ini` with `[Options] GlobalOffset` (ms), `DefaultSyncOffset`, `InputDebounceMs` and `[PortN] InputOffset` (ms). Offsets are clamped to ±1 s, and bad or missing values keep the defaults. It's loaded at boot, before the pad debounce is set and the library is scanned, and written whole to `config.ini.tmp`, then renamed over the old file (libfat can't rename over a file, so the old one is removed first). `VisualOffset`, `ScrollSpeed` and `LaneMap` come when something uses them (step 4 for scroll speed).
 
 ## 8. Wii-specific lifecycle
@@ -234,9 +235,9 @@ ddr-wii/
 │   │   ├── core/                 # portable C++17, no libogc includes
 │   │   │   ├── chart/  MsdFile.*  SmLoader.*  SscLoader.*  NoteData.*  Chart.*  PackIni.*  StringUtil.*
 │   │   │   ├── timing/ TimingData.*  (later) SongClock.h (interface)
-│   │   │   ├── judge/  (later) Judge.*  Score.*
+│   │   │   ├── game/   Judge.*  LifeMeter.*  Calibration.*  HighScores.*
 │   │   │   ├── config/ Config.*
-│   │   │   └── songs/  SongLibrary.*  (later) HighScores.*
+│   │   │   └── songs/  SongLibrary.*
 │   │   ├── platform/wii/         # libogc / GRRLIB wrappers: WiiVideo.*
 │   │   │                         #   (later) WiiInput.*  WiiAudio.*  WiiFs.*  WiiSystem.*
 │   │   ├── render/               # GRRLIB drawing: ArrowArt.*  Font.*  Draw.*
@@ -311,7 +312,7 @@ The logical canvas is 640 px wide. Four lanes at 64 px are 256 px, so:
 ### 11.4 Rules
 
 - The song keeps playing until it ends or **every** player has failed. A failed player's playfield greys out and stops judging. A per-player "no fail" option is planned with the rest of the options. **Built (M5 step 4, Competitive only):** a failed player's playfield greys out with "FAILED", and their % stays where it was. When every player has failed, the song ends 1.5 s later. The results show "FAILED" and the % in red.
-- Results show every player side by side. High scores are still keyed by `songHash + difficulty`. Player names or profiles come later (a three-letter entry on the results screen is enough at first).
+- Results show every player side by side. High scores are machine bests per chart and play mode (§7). Player names or profiles come later (a three-letter entry on the results screen is enough at first).
 - Assist clap and other SFX play once per row, not once per player.
 
 ### 11.5 Performance budget **[exp]**

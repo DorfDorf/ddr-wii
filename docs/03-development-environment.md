@@ -273,7 +273,7 @@ SD:/
     ├── songs/
     │   └── <Pack>/<Song>/     <- StepMania layout: Song.sm or Song.ssc, song.ogg/.mp3, banner.png, bg.png
     ├── config.ini            <- global offset, scroll speed, …
-    └── scores.dat            <- high scores
+    └── scores.txt            <- high scores
 ```
 
 The `apps/<name>/boot.dol`, `meta.xml` and 128×48 `icon.png` layout is from WiiBrew's HBC page **[doc]**. Keeping songs outside `apps/` keeps the HBC folder small.

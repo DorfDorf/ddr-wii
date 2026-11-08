@@ -48,6 +48,16 @@ void saveConfigIfChanged(screens::Session& session) {
         session.message = "Couldn't write sd:/ddrwii/config.ini";
 }
 
+constexpr const char* kScoresPath = "sd:/ddrwii/scores.txt";
+
+// Writes scores.txt after a song that recorded a score.
+void saveScoresIfChanged(screens::Session& session) {
+    if (!session.scores_dirty) return;
+    session.scores_dirty = false;
+    if (!game::SaveHighScores(kScoresPath, session.scores))
+        session.message = "Couldn't write sd:/ddrwii/scores.txt";
+}
+
 }  // namespace
 
 int main(int, char**) {
@@ -65,6 +75,7 @@ int main(int, char**) {
     // config.ini first: it sets the pad debounce and the sync of packs without a Pack.ini.
     screens::Session session;
     session.config_loaded = ddr::LoadConfig(screens::OffsetCalibration::kConfigPath, session.config);
+    game::LoadHighScores(kScoresPath, session.scores);   // none yet is fine
     wii::Input input;
     input.init((u32)session.config.inputDebounceMs * 1000);
 
@@ -111,6 +122,7 @@ int main(int, char**) {
             if (play) {
                 screens::Gameplay game(video, input, art, font, session);
                 runScene(video, input, game, false);
+                saveScoresIfChanged(session);
                 if (game.quitApp()) break;
                 continue;   // back to song select
             }
