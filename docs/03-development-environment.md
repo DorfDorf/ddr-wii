@@ -7,7 +7,7 @@
 | Item | Actual |
 |---|---|
 | devkitPro | Updater v3.0.3 → `C:\devkitPro`. devkitPPC r51 (GCC 16.2.0), libogc 3.2.1, wii-examples 20260510 |
-| Libraries + GRRLIB | Installed by [`tools/setup-devkitpro.sh`](../tools/setup-devkitpro.sh) (re-runnable). GRRLIB v4.6.1+ (master) in the MSys2 home `~/GRRLIB`. **Its Makefile is in the inner `GRRLIB/` folder**, so the command is `make -C ~/GRRLIB/GRRLIB clean all install` (the README's `make -C GRRLIB` assumes you're in the clone's parent) |
+| Libraries + GRRLIB | Installed by [`tools/setup-devkitpro.sh`](../tools/setup-devkitpro.sh) (re-runnable). GRRLIB v4.6.1 + 9 commits (`a426e61`, pinned in the script) in the MSys2 home `~/GRRLIB`. **Its Makefile is in the inner `GRRLIB/` folder**, so the command is `make -C ~/GRRLIB/GRRLIB clean all install` (the README's `make -C GRRLIB` assumes you're in the clone's parent) |
 | Official template | Installed by `wii-examples` at `C:\devkitPro\examples\wii\templates\makefile\application` (not `templates/makefile`). Built from a copy in `build-experiments/template/` (gitignored) |
 | Dolphin | **2609a** portable 7z, unpacked to `C:\Users\haler\Dolphin-x64` with `portable.txt` (user folder = `Dolphin-x64\User`). winget only has 5.0 (2016), so don't use it. The first launch shows an *Allow Usage Statistics Reporting* dialog (answered No) |
 | Build + run | `make -C tools/padtest run-dolphin` → [`tools/run-dolphin.sh`](../tools/run-dolphin.sh). It kills any open Dolphin, then boots the `.dol` with `-b -e` through `cmd /c start` so make returns at once. Edit → build → launch takes about 1 s. `DOLPHIN=/path/to/Dolphin.exe` overrides the default location |
@@ -305,24 +305,6 @@ Plug the mat into **GameCube port 1** (the leftmost, nearest the edge **[mem]**)
 
 ## 7. Git project structure
 
-The workspace isn't a git repository yet. When you're ready (needs your OK):
+The project is a git repository, hosted on GitHub as `DorfDorf/ddr-wii`. Work goes on a branch and into `main` through a pull request. [`.gitignore`](../.gitignore) keeps build outputs, `reference/` and songs out of git.
 
-```bash
-cd /c/Users/haler/Downloads/ddr-wii && git init
-```
-
-Suggested `.gitignore`:
-
-```
-# build outputs
-game/build/
-*.dol
-*.elf
-*.map
-# large reference material (keep originals out of git, or use Git LFS)
-reference/
-# local SD staging / songs (copyrighted music)
-sd/ddrwii/songs/
-```
-
-The directory layout is in [06-technical-design.md §9](06-technical-design.md#9-initial-repository-structure).
+The directory layout is in [06-technical-design.md §9](06-technical-design.md#9-repository-structure).

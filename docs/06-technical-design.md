@@ -8,7 +8,7 @@
 
 **Goals:** a single-player four-lane `dance-single` game that reads `.sm`/`.ssc` from SD, plays OGG/MP3, scrolls arrows in sync, judges taps and holds, shows a combo and score, and saves high scores. It runs in Dolphin and on a real Wii with a GameCube dance mat.
 
-**Local multiplayer:** **2 players is a requirement, 4 is a stretch goal** that depends on a performance and readability check (see §11). Each player uses their own mat on their own GameCube port and plays the same song with their own difficulty and scroll speed. The core is built per player from the start, even though the first playable milestones run with one player.
+**Local multiplayer:** **2 players is the target.** 4 players passed both the performance and readability checks on a real Wii (M2b), but it is **deferred until there's a working product** (after M6), by decision on 2026-11-08 (see §11). Each player uses their own mat on their own GameCube port and plays the same song with their own difficulty and scroll speed. The core is built per player from the start, even though the first playable milestones run with one player.
 
 **Non-goals (for now):** background videos, BGCHANGES, mods and attacks, Lua or themes, courses, doubles (one player on two mats, which the per-port design makes easy to add later), online play, editing. All of these can be added later without changing the core.
 
@@ -194,36 +194,40 @@ Options (scroll speed, global offset, calibration) reachable from Title.
 - **Exit:** return from `main()` or call `exit(0)` to go back to HBC/Dolphin.
 - Memory: allocate large buffers (audio file, ring, textures) from MEM2 where possible. Watch the heap usage display in the debug overlay.
 
-## 9. Initial repository structure
+## 9. Repository structure
 
 ```
 ddr-wii/
+├── CLAUDE.md                     # notes for Claude: commands, code rules, key decisions
 ├── docs/                         # these documents
-├── reference/                    # supplied archives + extracted copies (read-only, not modified)
+├── reference/                    # supplied archives + extracted copies (local only, read-only, not in git)
 ├── tools/
-│   ├── padtest/                  # M1/M3: diagnostic from doc 04 (own Makefile)
-│   ├── deploy-dolphin.sh         # copy boot.dol + sd/ to Dolphin's WiiSDSync, launch Dolphin -e
-│   └── simfile-oracle.py         # dumps beat→time tables via `simfile` for unit tests
+│   ├── padtest/                  # M1/M3: pad diagnostic from doc 04 (own Makefile)
+│   ├── run-dolphin.sh            # boot a .dol in Dolphin (used by `make run-dolphin`)
+│   ├── setup-devkitpro.sh        # one-time toolchain + GRRLIB setup (doc 03)
+│   └── simfile-oracle.py         # dumps beat→time tables via `simfile` for the tests
 ├── game/
 │   ├── Makefile                  # based on devkitPro wii-examples/templates/makefile
 │   ├── source/
 │   │   ├── main.cpp
 │   │   ├── core/                 # portable C++17, no libogc includes
-│   │   │   ├── chart/  MsdParser.*  SmLoader.*  SscLoader.*  Chart.h
-│   │   │   ├── timing/ TimingData.*  SongClock.h (interface)
-│   │   │   ├── judge/  Judge.*  Score.*
-│   │   │   └── songs/  SongLibrary.*  HighScores.*  Config.*
-│   │   ├── platform/wii/         # libogc / GRRLIB implementations
-│   │   │   ├── WiiInput.*  WiiAudio.*  WiiVideo.*  WiiFs.*  WiiSystem.*
-│   │   └── screens/  Title.*  SongSelect.*  Gameplay.*  Results.*  Options.*
-│   ├── data/                     # small embedded assets (font, arrow atlas) → linked in
-│   └── tests/                    # host-side unit tests for core/ (build with g++/MSVC on PC)
+│   │   │   ├── chart/  MsdFile.*  SmLoader.*  SscLoader.*  NoteData.*  Chart.*  PackIni.*  StringUtil.*
+│   │   │   ├── timing/ TimingData.*  (later) SongClock.h (interface)
+│   │   │   ├── judge/  (later) Judge.*  Score.*
+│   │   │   └── songs/  (later) SongLibrary.*  HighScores.*  Config.*
+│   │   ├── platform/wii/         # libogc / GRRLIB wrappers: WiiVideo.*
+│   │   │                         #   (later) WiiInput.*  WiiAudio.*  WiiFs.*  WiiSystem.*
+│   │   ├── render/               # GRRLIB drawing: ArrowArt.*  Font.*  Draw.*
+│   │   └── screens/  PlayfieldStress.*  RenderTest.*
+│   │                 (later) Title.*  SongSelect.*  Gameplay.*  Results.*  Options.*
+│   ├── data/                     # (later) small embedded assets (font, arrow atlas) → linked in
+│   └── tests/                    # host-side tests for core/ (built with g++ on the PC)
 └── sd/                           # staging copy of the SD card layout (doc 03 §6.3)
     ├── apps/ddrwii/{boot.dol,meta.xml,icon.png}
     └── ddrwii/songs/<Pack>/<Song>/...
 ```
 
-The `core/` code has no dependency on libogc, so `game/tests/` can compile it with your PC compiler, and parser and timing bugs can be found in seconds without Dolphin.
+Entries marked (later) are planned and don't exist yet. The `core/` code has no dependency on libogc, so `game/tests/` can compile it with your PC compiler, and parser and timing bugs can be found in seconds without Dolphin.
 
 ## 10. Design decisions driven by the Wii hardware
 
@@ -239,6 +243,8 @@ The `core/` code has no dependency on libogc, so `game/tests/` can compile it wi
 | 4 GameCube ports (original Wii models only) | Up to 4 local players, one mat per port. The Family Edition (RVL-101) and Wii Mini have no GameCube ports, so this game needs an original-model Wii, even for one player |
 
 ## 11. Local multiplayer (2–4 players)
+
+**Scope (decided 2026-11-08): build 2 players now; 4 players later.** M2b showed 4P is fast enough and readable on a real Wii, but it waits until the game works end to end. The per-player design below costs nothing extra for 2P, so the only 4P-specific work left for later is the 3–4P layout (§11.3), the join flow for ports 3–4, and testing with four mats.
 
 ### 11.1 What is shared and what is per player
 
@@ -271,7 +277,11 @@ The logical canvas is 640 px wide. Four lanes at 64 px are 256 px, so:
 | 3–4 | ~36 px (arrows scaled ≈ 0.55) | ~144 px, plus gaps | Four columns of 160 px. Judgement and combo text sits inside each column |
 
 - Every draw goes through a `Playfield{ x, laneWidth, scale }` built from this table, so 1, 2 and 4 players use the same rendering code.
-- **[exp] 4-player readability:** 36 px arrows on a 480-line TV, 3 m from the screen, may be too small to read at high scroll speeds. Check it on a real TV before committing to 4P. If it fails, try a 16:9 mode: with the Wii set to widescreen, the TV stretches the 640 px framebuffer, so drawing for an 854 px-wide logical canvas gives each player room for lanes about 48 px wide on screen.
+- **Overscan safe area (found in the M2b hardware run).** CRTs and many LCDs crop the edges of the Wii picture. On the test TV (Sony Bravia, 480p) the 4P layout lost the left edge of P1's left lane, the top of the life bars and the bottom of the screen. So:
+  - Playfields stay inside the **action-safe area** (5% margin: x 32–608, y 24–456). For 3–4P that means four 144 px columns with **32 px lanes** (scale 0.5), slightly smaller than the 36 px tested.
+  - Text and HUD (scores, life bars, judgement, combo, debug overlay) stay inside the **title-safe area** (10% margin: x 64–576, y 48–432).
+  - An **overscan adjustment** in Options (shrink or grow the safe area per TV, stored in `config.ini`) covers TVs that crop more or less.
+- **4-player readability: passed** (M2b, 2026-11-08). 36 px arrows were readable from playing distance on the test TV. When 4P is picked up, recheck at 32 px lanes inside the safe area. A 16:9 mode (Wii set to widescreen, drawing for an 854 px-wide logical canvas, lanes about 48 px wide on screen) remains an option if needed.
 
 ### 11.4 Rules
 
@@ -297,3 +307,5 @@ The M2 render test already holds full frame rate with **1,600 sprites** in Dolph
 - **Four mats polled at once:** check that SI polling with four devices connected doesn't change the PAD sampling interval measured in M3.
 
 The test plan is in doc 05 (M2b, then the M3 and M6 hardware checks).
+
+**Result (M2b on a real Wii, 2026-11-08):** performance is settled. With the worst-case scene, 4 players took 1.58 ms of CPU and about 1 ms of GPU wait per 16.7 ms frame, with no dropped frames at any player count (full table in doc 05, M2b). That's roughly 5× headroom, so neither draw calls nor fill rate limits 4 players, and the atlas and batching mitigations above aren't needed for now. Dolphin's CPU numbers turned out slightly *higher* than hardware for this code. The open questions for 4P are readability and the overscan safe area (§11.3), not speed.

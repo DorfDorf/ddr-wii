@@ -18,9 +18,15 @@ static GXRModeObj *rmode;
 static volatile u64 last_sample_tick = 0;
 static volatile u32 sample_count = 0, min_us = 0xFFFFFFFF, max_us = 0;
 
-// Called by libogc each time new SI pad data is sampled. Runs in interrupt
-// context, so keep it tiny (no printf, no malloc).
-static void on_pad_sample(void) {
+// Called from the SI polling (RDST) interrupt each time new pad data has been sampled.
+// Runs in interrupt context, so keep it tiny (no printf, no malloc).
+//
+// Registered with SI_RegisterPollingHandler directly: in libogc 3.2.1,
+// PAD_SetSamplingCallback stores the callback but its internal polling handler
+// (__pad_samplinghandler in pad.c) is an empty stub that never calls it. On both
+// Dolphin and a real Wii that left "PAD samples: 0".
+static void on_pad_sample(u32 irq, void *ctx) {
+    (void)irq; (void)ctx;
     u64 now = gettime();
     if (last_sample_tick) {
         u32 us = (u32)diff_usec(last_sample_tick, now);
@@ -55,7 +61,8 @@ int main(int argc, char **argv) {
     VIDEO_WaitVSync();
     if (rmode->viTVMode & VI_NON_INTERLACE) VIDEO_WaitVSync();
 
-    PAD_SetSamplingCallback(on_pad_sample);
+    SI_RegisterPollingHandler(on_pad_sample);
+    const u64 start = gettime();
 
     int max_simultaneous[4] = {0};
     u32 quit_frames = 0;
@@ -84,12 +91,18 @@ int main(int argc, char **argv) {
                    (held & PAD_BUTTON_RIGHT) ? 'R' : ' ',
                    max_simultaneous[ch]);
         }
-        printf("PAD samples: %lu  interval min/max: %lu / %lu us        \n",
-               (unsigned long)sample_count, (unsigned long)min_us, (unsigned long)max_us);
+        const u32 secs = (u32)(diff_usec(start, gettime()) / 1000000u);
+        printf("PAD samples: %lu (%lu/s)  interval min/max: %lu / %lu us        \n",
+               (unsigned long)sample_count,
+               (unsigned long)(secs ? sample_count / secs : 0),
+               (unsigned long)(sample_count > 1 ? min_us : 0), (unsigned long)max_us);
 
         u16 h0 = PAD_ButtonsHeld(0);
         quit_frames = ((h0 & PAD_BUTTON_START) && (h0 & PAD_TRIGGER_Z)) ? quit_frames + 1 : 0;
-        if (quit_frames > 120) break;
+        if (quit_frames > 120) {
+            SI_UnregisterPollingHandler(on_pad_sample);
+            break;
+        }
 
         VIDEO_WaitVSync();
     }

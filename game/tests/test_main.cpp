@@ -35,6 +35,7 @@
 #include "../source/core/chart/SscLoader.h"
 #include "../source/core/chart/StringUtil.h"
 #include "../source/core/timing/TimingData.h"
+#include "../source/core/input/InputFilter.h"
 
 using namespace ddr;
 
@@ -602,6 +603,65 @@ static void RunFuzz(const std::string& dir, int iterations) {
               truncations, iterations, sizeof(nasty) / sizeof(nasty[0]) + 2);
 }
 
+// ---- InputFilter (debounce, doc 06 §3.4) ----
+
+// Feeds (time_us, raw) samples and collects the reported changes as "b<bit><+|-><time_us>".
+static std::vector<std::string> FeedAll(input::InputFilter& f,
+                                        const std::vector<std::pair<uint64_t, uint16_t>>& samples) {
+  std::vector<std::string> log;
+  input::InputFilter::Change out[input::InputFilter::kButtons];
+  for (const auto& s : samples) {
+    const int n = f.feed(s.first, s.second, out);
+    for (int i = 0; i < n; ++i)
+      log.push_back("b" + std::to_string(out[i].button) + (out[i].pressed ? "+" : "-") +
+                    std::to_string(out[i].time_us));
+  }
+  return log;
+}
+
+static void TestInputFilter() {
+  std::printf("InputFilter\n");
+  using V = std::vector<std::string>;
+  {  // Clean press and release far apart: both reported at once with their own times.
+    input::InputFilter f(20000);
+    CHECK((FeedAll(f, {{0, 0}, {8000, 1}, {16000, 1}, {100000, 0}}) == V{"b0+8000", "b0-100000"}));
+    CHECK(f.state() == 0);
+  }
+  {  // Bounce: release 5 ms after the press, re-press 3 ms later -> both dropped.
+    input::InputFilter f(20000);
+    CHECK((FeedAll(f, {{0, 1}, {5000, 0}, {8000, 1}, {40000, 1}}) == V{"b0+0"}));
+    CHECK(f.state() == 1);
+  }
+  {  // Short real tap: release inside the window is held back, then reported with its own time.
+    input::InputFilter f(20000);
+    CHECK((FeedAll(f, {{0, 1}, {10000, 0}, {18000, 0}, {26000, 0}}) == V{"b0+0", "b0-10000"}));
+  }
+  {  // Jump: two panels in the same sample are two independent changes, in bit order.
+    input::InputFilter f(20000);
+    CHECK((FeedAll(f, {{0, 0}, {8000, 0x0003}}) == V{"b0+8000", "b1+8000"}));
+    CHECK(f.state() == 0x0003);
+  }
+  {  // Debounce is per button: a change on another panel is not held back.
+    input::InputFilter f(20000);
+    CHECK((FeedAll(f, {{0, 0x1}, {4000, 0x3}}) == V{"b0+0", "b1+4000"}));
+  }
+  {  // reset() takes the current state without reporting anything.
+    input::InputFilter f(20000);
+    f.reset(0x0008);
+    CHECK((FeedAll(f, {{0, 0x0008}, {8000, 0x0008}}) == V{}));
+    CHECK((FeedAll(f, {{9000, 0}}) == V{"b3-9000"}));   // first change after reset: no window
+  }
+  {  // Window 0 disables debouncing: every change is reported.
+    input::InputFilter f(0);
+    CHECK((FeedAll(f, {{0, 1}, {1000, 0}, {2000, 1}}) == V{"b0+0", "b0-1000", "b0+2000"}));
+  }
+  {  // Times stay monotonic per button even when a held-back change is reported late.
+    input::InputFilter f(20000);
+    auto log = FeedAll(f, {{0, 1}, {5000, 0}, {9000, 1}, {12000, 0}, {30000, 0}, {31000, 1}, {40000, 1}});
+    CHECK((log == V{"b0+0", "b0-12000", "b0+31000"}));
+  }
+}
+
 int main(int argc, char** argv) {
   std::string dir = ".";
   int fuzzIterations = 3000;
@@ -620,6 +680,7 @@ int main(int argc, char** argv) {
   TestSscSplitTiming();
   TestPackIni();
   TestHeaderTags();
+  TestInputFilter();
   RunFuzz(dir, fuzzIterations);
 
   std::printf("\n%d checks, %d failures%s\n", g_checks, g_failures,

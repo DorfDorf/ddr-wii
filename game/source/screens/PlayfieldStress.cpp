@@ -5,6 +5,7 @@
 #include <math.h>
 #include <ogc/lwp_watchdog.h>
 
+#include "platform/wii/WiiInput.h"
 #include "platform/wii/WiiVideo.h"
 #include "render/ArrowArt.h"
 #include "render/Draw.h"
@@ -38,9 +39,10 @@ u32 withAlpha(u32 rgba, float a) {
 
 }  // namespace
 
-PlayfieldStress::PlayfieldStress(wii::Video& video, const render::ArrowArt& art,
+PlayfieldStress::PlayfieldStress(wii::Video& video, const wii::Input& input,
+                                 const render::ArrowArt& art,
                                  const render::Font& font)
-    : video_(video), art_(art), font_(font) {
+    : video_(video), input_(input), art_(art), font_(font) {
     start_ticks_ = gettime();
 }
 
@@ -74,8 +76,8 @@ bool PlayfieldStress::frame() {
 }
 
 void PlayfieldStress::handleInput() {
-    held_ = PAD_ButtonsHeld(0);
-    const u16 down = PAD_ButtonsDown(0);
+    held_ = input_.held(0);
+    const u16 down = input_.down(0);
     if (down & PAD_BUTTON_A) auto_ = !auto_;
     int manual = 0;
     if (down & PAD_TRIGGER_R) manual = 1;

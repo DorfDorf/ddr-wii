@@ -12,9 +12,10 @@ CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O2 -g -Wall -Wextra -pedantic
 PYTHON   ?= py
 
-CORE_SRCS := $(wildcard ../source/core/chart/*.cpp) $(wildcard ../source/core/timing/*.cpp)
+# Everything in core/ and its folders (chart/, timing/, ...), so new folders get built and tested too.
+CORE_SRCS := $(wildcard ../source/core/*.cpp ../source/core/*/*.cpp)
 SRCS      := test_main.cpp $(CORE_SRCS)
-HDRS      := $(wildcard ../source/core/chart/*.h) $(wildcard ../source/core/timing/*.h)
+HDRS      := $(wildcard ../source/core/*.h ../source/core/*/*.h)
 BIN       := build/ddr_tests
 
 .PHONY: all run build oracle clean
