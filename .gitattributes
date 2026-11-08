@@ -1,0 +1,16 @@
+# Normalise text files; let Git pick the platform's line endings by default.
+* text=auto
+
+# Shell scripts and Makefiles run under MSys2 bash/make, which choke on CRLF.
+*.sh      text eol=lf
+Makefile  text eol=lf
+*.mk      text eol=lf
+
+# Binary assets
+*.png  binary
+*.jpg  binary
+*.ogg  binary
+*.mp3  binary
+*.wav  binary
+*.dol  binary
+*.elf  binary
