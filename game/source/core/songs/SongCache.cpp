@@ -19,9 +19,8 @@
 
 #include <cstdio>
 
-#include "../chart/SmLoader.h"  // ReadFileToString
+#include "../util/TextFile.h"
 #include "../chart/StringUtil.h"
-#include "../config/Config.h"   // WriteFileAtomic
 #include "SongLibrary.h"
 
 namespace ddr {
@@ -29,12 +28,6 @@ namespace {
 
 constexpr int kSongFields = 19;   // through nCharts
 constexpr int kChartFields = 9;
-
-std::string Clean(std::string s) {
-  for (char& c : s)
-    if (c == '\t' || c == '\r' || c == '\n') c = ' ';
-  return s;
-}
 
 std::string Header() { return "ddr-wii song cache " + std::to_string(SongCache::kVersion); }
 
@@ -44,7 +37,7 @@ void Num(std::string& out, double v) {
   out += buf;
 }
 void Num(std::string& out, int v) { out += "\t" + std::to_string(v); }
-void Str(std::string& out, const std::string& s) { out += "\t" + Clean(s); }
+void Str(std::string& out, const std::string& s) { out += "\t" + CleanField(s); }
 
 }  // namespace
 
@@ -115,11 +108,11 @@ std::string SongCache::Write() const {
   for (const auto& kv : items) {
     const Item& it = kv.second;
     if (!it.ok) {
-      out += "S\t" + Clean(kv.first) + "\t" + it.sig + "\t" + Clean(it.warning) + "\n";
+      out += "S\t" + CleanField(kv.first) + "\t" + it.sig + "\t" + CleanField(it.warning) + "\n";
       continue;
     }
     const SongEntry& s = it.song;
-    out += "O\t" + Clean(kv.first) + "\t" + it.sig;
+    out += "O\t" + CleanField(kv.first) + "\t" + it.sig;
     Str(out, s.folder);
     Str(out, s.simfile);
     Str(out, s.music);

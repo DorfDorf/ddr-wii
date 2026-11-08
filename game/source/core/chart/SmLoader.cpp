@@ -640,18 +640,6 @@ bool LoadSmFromString(const std::string& text, Song& out) {
   return !out.charts.empty();
 }
 
-bool ReadFileToString(const std::string& path, std::string& out) {
-  out.clear();
-  std::FILE* f = std::fopen(path.c_str(), "rb");
-  if (!f) return false;
-  char buf[16384];
-  size_t n;
-  while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) out.append(buf, n);
-  bool ok = !std::ferror(f);
-  std::fclose(f);
-  return ok;
-}
-
 static bool EndsWithNoCase(const std::string& s, const char* suffix) {
   size_t n = std::strlen(suffix);
   return s.size() >= n && EqualsNoCase(s.substr(s.size() - n), suffix);

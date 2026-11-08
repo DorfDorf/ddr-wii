@@ -34,7 +34,7 @@ bool decodePng(const std::vector<unsigned char>& file, std::vector<unsigned char
     img.version = PNG_IMAGE_VERSION;
     if (!png_image_begin_read_from_memory(&img, file.data(), file.size())) return false;
     if (img.width < 1 || img.height < 1 || img.width > (unsigned)Banner::kMaxSide ||
-        img.height > (unsigned)Banner::kMaxSide) {
+        img.height > (unsigned)Banner::kMaxSide || img.width * img.height > (unsigned)Banner::kMaxPixels) {
         png_image_free(&img);
         return false;
     }
@@ -59,6 +59,7 @@ void jpegErrorExit(j_common_ptr c) { std::longjmp(((JpegError*)c->err)->jump, 1)
 bool decodeJpeg(const std::vector<unsigned char>& file, std::vector<unsigned char>& rgba, int& w, int& h) {
     jpeg_decompress_struct cinfo;
     JpegError err;
+    std::vector<unsigned char> row;   // before setjmp, so a longjmp from libjpeg can't skip its destructor
     cinfo.err = jpeg_std_error(&err.mgr);
     err.mgr.error_exit = jpegErrorExit;
     if (setjmp(err.jump)) {
@@ -72,11 +73,12 @@ bool decodeJpeg(const std::vector<unsigned char>& file, std::vector<unsigned cha
     jpeg_start_decompress(&cinfo);
     w = (int)cinfo.output_width;
     h = (int)cinfo.output_height;
-    if (w < 1 || h < 1 || w > Banner::kMaxSide || h > Banner::kMaxSide || cinfo.output_components != 3) {
+    if (w < 1 || h < 1 || w > Banner::kMaxSide || h > Banner::kMaxSide || w * h > Banner::kMaxPixels ||
+        cinfo.output_components != 3) {
         jpeg_destroy_decompress(&cinfo);
         return false;
     }
-    std::vector<unsigned char> row((size_t)w * 3);
+    row.resize((size_t)w * 3);
     rgba.resize((size_t)w * h * 4);
     while (cinfo.output_scanline < cinfo.output_height) {
         const int y = (int)cinfo.output_scanline;

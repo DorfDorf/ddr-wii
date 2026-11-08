@@ -58,8 +58,6 @@ constexpr u32 kPlayerColour[Session::kMaxPlayers] = {0xFF47B3FF, 0xFF5D47FF};
 constexpr u32 kBg = 0x101828FF, kBox = 0x1E282FFF, kDark = 0x0A141BFF, kPackBg = 0x4C565DFF;
 constexpr u32 kWhite = 0xFFFFFFFF, kGrey = 0x9AA4ABFF, kBlack = 0x000000FF;
 
-u64 cpuUs() { return ticks_to_microsecs(gettime()); }
-
 // Prints at most max_chars characters (cut with "..").
 void printFit(const render::Font& font, float x, float y, u32 colour, float scale, const std::string& s,
               int max_chars) {
@@ -250,7 +248,7 @@ void SongSelect::handleInput() {
         }
     }
 
-    const u64 now = cpuUs();
+    const u64 now = wii::Input::nowUs();
     if (dir) {
         moveCursor(dir);
         repeat_dir_ = dir;
@@ -290,7 +288,7 @@ bool SongSelect::frame() {
 // Like ITG, wait until the cursor has rested on a row before loading its banner and preview,
 // so scrolling through the wheel doesn't start a load per row.
 void SongSelect::updateMedia() {
-    const u64 now = cpuUs();
+    const u64 now = wii::Input::nowUs();
     if (session_.pack != media_pack_ || session_.song != media_song_) {
         media_pack_ = session_.pack;
         media_song_ = session_.song;
@@ -444,8 +442,16 @@ void SongSelect::drawPane(int slot, const ddr::SongEntry* s) {
     font_.print(x + 8, y + 66, kBlack, 1, "Rolls %4d  Speed %.2fx", c->rolls, p.speed);
 
     // The machine best for this chart in the current play mode (doc 06 §7), on the right.
-    const game::HighScoreEntry* best =
-        session_.scores.find(game::ChartKey(session_.config.playMode, *s, *c));
+    // Looked up only when the slot's song or chart changes (the mode and the table don't
+    // change while song select is open, and map entries don't move).
+    PaneBest& pb = pane_best_[slot];
+    if (pb.pack != session_.pack || pb.song != session_.song || pb.chart != p.chart) {
+        pb.pack = session_.pack;
+        pb.song = session_.song;
+        pb.chart = p.chart;
+        pb.entry = session_.scores.find(game::ChartKey(session_.config.playMode, *s, *c));
+    }
+    const game::HighScoreEntry* best = pb.entry;
     if (best) {
         std::snprintf(buf, sizeof buf, "%.2f%%", best->best.percent_x100 / 100.0);
     } else {

@@ -66,7 +66,7 @@ class HighScoreTable {
 
 // Reads path into out. Returns false (out unchanged) if there is no file.
 bool LoadHighScores(const std::string& path, HighScoreTable& out);
-// Writes path + ".tmp", then renames it over path (ddr::WriteFileAtomic).
+// Writes path + ".tmp", then renames it over path (ddr::WriteFileAtomic, util/TextFile.h).
 bool SaveHighScores(const std::string& path, const HighScoreTable& table);
 
 }  // namespace game

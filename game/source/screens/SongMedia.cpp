@@ -103,6 +103,9 @@ void SongMedia::loop() {
             LWP_MutexUnlock((mutex_t)mutex_);
             if (tex) GRRLIB_FreeTexture(tex);
             if (!current) continue;   // the cursor moved on: start over with the new request
+            // Leaving song select: don't start reading a whole song file the destructor would
+            // then have to wait for.
+            if (quit_) break;
 
             if (!same_music && !r.music.empty()) {
                 music = r.music;

@@ -25,8 +25,6 @@ constexpr float kLane = 64, kArrowY = 150;
 constexpr float kLaneDegrees[4] = {-90.0f, 180.0f, 0.0f, 90.0f};   // art points up
 constexpr u64 kFlashUs = 120000;
 
-u64 cpuUs() { return ticks_to_microsecs(gettime()); }
-
 void printCentred(const render::Font& font, float y, u32 colour, float scale, const char* text) {
     font.print(320 - std::strlen(text) * render::Font::kGlyphW * scale / 2, y, colour, scale, "%s", text);
 }
@@ -65,7 +63,7 @@ void OffsetCalibration::save() {
 }
 
 bool OffsetCalibration::frame() {
-    const u64 now_us = cpuUs();
+    const u64 now_us = wii::Input::nowUs();
     const u16 down0 = input_.down(0);
     if (down0 & PAD_BUTTON_B) return false;   // back, nothing saved
 

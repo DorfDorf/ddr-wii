@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <vector>
 
-#include "../chart/SmLoader.h"     // ReadFileToString
+#include "../util/TextFile.h"
 #include "../chart/StringUtil.h"
 
 namespace game {
@@ -19,13 +19,6 @@ const char* const kTierNames[kNumGradeTiers + 1] = {
 
 const char* ModeName(ddr::PlayMode m) {
   return m == ddr::PlayMode::Competitive ? "Competitive" : "Casual";
-}
-
-// No tabs or line breaks inside a key field.
-std::string Clean(std::string s) {
-  for (char& c : s)
-    if (c == '\t' || c == '\r' || c == '\n') c = ' ';
-  return s;
 }
 
 }  // namespace
@@ -52,8 +45,8 @@ std::string ChartKey(ddr::PlayMode mode, const ddr::SongEntry& song, const ddr::
   ddr::Split(song.dir, '/', parts);
   std::string folder = parts.size() >= 2 ? parts[parts.size() - 2] + "/" + parts.back()
                                          : song.dir;
-  return std::string(ModeName(mode)) + "\t" + Clean(folder) + "\t" +
-         ddr::DifficultyToString(chart.difficulty) + "\t" + Clean(chart.description);
+  return std::string(ModeName(mode)) + "\t" + ddr::CleanField(folder) + "\t" +
+         ddr::DifficultyToString(chart.difficulty) + "\t" + ddr::CleanField(chart.description);
 }
 
 bool HighScoreTable::submit(const std::string& key, const HighScore& score) {

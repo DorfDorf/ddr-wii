@@ -68,6 +68,12 @@ private:
     bool calibrate_ = false;
     bool back_ = false;
 
+    struct PaneBest {                  // drawPane's cached high-score lookup, per slot
+        int pack = -2, song = -2, chart = -1;
+        const game::HighScoreEntry* entry = nullptr;
+    };
+    PaneBest pane_best_[Session::kMaxPlayers];
+
     SongMedia media_;                  // banner + preview worker (M5 step 6)
     int media_pack_ = -2, media_song_ = -2;   // the row the cursor was last seen on
     u64 media_moved_us_ = 0;

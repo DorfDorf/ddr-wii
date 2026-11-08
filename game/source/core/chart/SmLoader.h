@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "Chart.h"
+#include "../util/TextFile.h"  // ReadFileToString, which used to live here
 
 namespace ddr {
 
@@ -33,8 +34,6 @@ bool LoadSongFile(const std::string& path, Song& out);
  *  .sm. Returns "" if there is neither. */
 std::string PickSimfile(const std::vector<std::string>& filenames);
 
-/** Read a whole file. Returns false on error. */
-bool ReadFileToString(const std::string& path, std::string& out);
 
 // Timing tag helpers shared by the .sm and .ssc loaders (SMLoader members in
 // StepMania). Problems are appended to *warnings.
