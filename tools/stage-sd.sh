@@ -6,6 +6,8 @@
 #   <dest>/ddrwii/                      (data folder the game will read songs from)
 #   <dest>/ddrwii/test/click120-*.wav   (M4b click tracks, tools/make-click-track.py; made once)
 #   <dest>/ddrwii/songs/ddr-wii tests/Click 120/   (M4c test song, tools/make-test-song.py)
+#   <dest>/ddrwii/songs/<pack>/                    (each pack folder in $SONG_PACKS, default
+#                                                   C:\Games\ITGmania\Songs; SONG_PACKS= skips it)
 #
 # Usage (devkitPro MSys2 shell):
 #   tools/stage-sd.sh            # stage into sd/ in the repo (gitignored boot.dol files)
@@ -75,5 +77,17 @@ if [ -n "$py" ] && [ -f "$dest/ddrwii/test/click120-44k.ogg" ]; then
     cp "$dest/ddrwii/test/click120-44k.ogg" "$song/"
 else
     echo "  (no python or OGG: skipped $song)"
+fi
+# Song packs from a StepMania/ITGmania Songs folder (M5). Only newer files are copied, and
+# nothing that isn't a pack folder (instructions.txt and the like stay behind).
+packs="${SONG_PACKS-/c/Games/ITGmania/Songs}"
+if [ -n "$packs" ] && [ -d "$packs" ]; then
+    for pack in "$packs"/*/; do
+        [ -d "$pack" ] || continue
+        cp -ru "${pack%/}" "$dest/ddrwii/songs/"
+        echo "  $dest/ddrwii/songs/$(basename "$pack")/"
+    done
+elif [ -n "$packs" ]; then
+    echo "  (no song packs at $packs)"
 fi
 echo "Done. Copy the apps/ and ddrwii/ folders to the root of the SD card."

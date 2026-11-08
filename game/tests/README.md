@@ -37,7 +37,9 @@ then `ddr_tests.exe .`
    merging; `.sm` negative BPMs and stops turned into warps
    (`ProcessBPMsAndStops`, which `simfile` doesn't implement); hold
    matching; split timing; old-`.ssc` absolute warps; `pack.ini` and
-   `SyncOffset`.
+   `SyncOffset`; the song library scan on the fake folder tree in
+   `library/` (pack order, `.ssc` before `.sm`, music and banner choice,
+   skipped songs).
 3. **Fuzz.** Every corpus file is truncated at about 200 lengths, and 3000
    random mutations are applied (bytes from `#:;,=\/-.0-9eErR`, newlines, note
    characters, random bytes; inserts and deletes). The results go through both

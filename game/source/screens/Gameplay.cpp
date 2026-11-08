@@ -20,7 +20,8 @@
 namespace screens {
 namespace {
 
-constexpr const char* kSongPath = "sd:/ddrwii/songs/ddr-wii tests/Click 120/click120.sm";
+constexpr const char* kSongsRoot = "sd:/ddrwii/songs";
+constexpr const char* kTestSongFolder = "Click 120";   // starts here if found
 
 constexpr float kArt = render::ArrowArt::kSize;
 constexpr float kLane = 64.0f;          // lane spacing, 1-2 players (doc 06 §11.3)
@@ -75,29 +76,50 @@ void printCentred(const render::Font& font, float cx, float y, u32 colour, float
 Gameplay::Gameplay(wii::Video& video, const wii::Input& input, const render::ArrowArt& art,
                    const render::Font& font)
     : video_(video), input_(input), art_(art), font_(font) {
-    loadSong();
-}
-
-void Gameplay::loadSong() {
-    const std::string path = kSongPath;
-    song_dir_ = path.substr(0, path.rfind('/') + 1);
-    if (!ddr::LoadSongFile(path, song_)) {
-        error_ = std::string("can't load ") + path;
-        state_ = State::Error;
-        return;
-    }
-    for (size_t i = 0; i < song_.charts.size(); i++)
-        if (song_.charts[i].stepsType == "dance-single" && !song_.charts[i].notes.empty())
-            charts_.push_back((int)i);
-    if (charts_.empty()) {
-        error_ = "no dance-single charts in " + path;
-        state_ = State::Error;
-        return;
-    }
     // P1 on port 1; P2 joins on the ready screen.
     players_.resize(1);
     players_[0].port = 0;
     layout();
+    scanLibrary();
+    if (!songs_.empty()) loadSong();
+}
+
+void Gameplay::scanLibrary() {
+    const u64 t0 = cpuUs();
+    if (!ddr::ScanSongLibrary(kSongsRoot, library_)) {
+        error_ = std::string("can't open ") + kSongsRoot;
+        return;
+    }
+    scan_us_ = cpuUs() - t0;
+    for (size_t p = 0; p < library_.packs.size(); p++)
+        for (size_t s = 0; s < library_.packs[p].songs.size(); s++) {
+            if (library_.packs[p].songs[s].folder == kTestSongFolder) song_index_ = (int)songs_.size();
+            songs_.push_back({(int)p, (int)s});
+        }
+    if (songs_.empty()) error_ = std::string("no playable songs in ") + kSongsRoot;
+}
+
+void Gameplay::loadSong() {
+    const ddr::PackEntry& pack = library_.packs[songs_[song_index_].pack];
+    const ddr::SongEntry& entry = pack.songs[songs_[song_index_].song];
+    song_ = ddr::Song();
+    charts_.clear();
+    song_dir_ = entry.dir;
+    music_ = entry.music;
+    if (!ddr::LoadSongFile(entry.SimfilePath(), song_)) {
+        error_ = "can't load " + entry.SimfilePath();
+        state_ = State::Error;
+        return;
+    }
+    song_.SetGroupOffset(pack.info.syncOffset);
+    for (const ddr::ChartInfo& c : entry.charts)
+        if (c.index < (int)song_.charts.size()) charts_.push_back(c.index);
+    if (charts_.empty()) {
+        error_ = "no dance-single charts in " + entry.SimfilePath();
+        state_ = State::Error;
+        return;
+    }
+    for (Player& p : players_) p.chart = std::min(p.chart, (int)charts_.size() - 1);
     state_ = State::Ready;
 }
 
@@ -120,8 +142,8 @@ void Gameplay::start() {
     clock_.reset();
     last_tick_report_ = 0;
     chart_s_ = 0;
-    if (!stream_.open((song_dir_ + song_.music).c_str())) {
-        error_ = std::string(song_.music) + ": " + stream_.error();
+    if (!stream_.open((song_dir_ + music_).c_str())) {
+        error_ = music_ + ": " + stream_.error();
         state_ = State::Error;
         return;
     }
@@ -219,8 +241,16 @@ void Gameplay::layout() {
 //   port 2: START joins as a human P2;
 //   A or START on a joined port plays.
 void Gameplay::handleMenu() {
-    if (state_ == State::Error) return;
     const u16 down0 = input_.down(0);
+    // L/R on port 1: previous/next song in the library (until song select, M5 step 2).
+    // Also from the error screen, so one bad simfile doesn't block the rest.
+    if (state_ != State::Done && (down0 & (PAD_TRIGGER_L | PAD_TRIGGER_R)) && songs_.size() > 1) {
+        const int m = (int)songs_.size();
+        song_index_ = (song_index_ + ((down0 & PAD_TRIGGER_L) ? m - 1 : 1)) % m;
+        loadSong();
+        return;
+    }
+    if (state_ == State::Error) return;
     if (state_ == State::Done) {
         for (const Player& p : players_)
             if (input_.down(p.port) & (PAD_BUTTON_START | PAD_BUTTON_A)) state_ = State::Ready;
@@ -416,6 +446,9 @@ void Gameplay::drawHud(double chart_s) {
 
 void Gameplay::drawReady() {
     const u32 white = 0xFFFFFFFF, grey = 0xB0B0B0FF, warn = 0xFFC040FF;
+    const ddr::PackEntry& pack = library_.packs[songs_[song_index_].pack];
+    font_.print(64, 32, grey, 1, "%s   song %d/%d   L/R change", pack.info.displayTitle.c_str(),
+                song_index_ + 1, (int)songs_.size());
     font_.print(64, 48, white, 2, "%s", song_.title.c_str());
     font_.print(64, 84, grey, 1, "%s", song_.subtitle.c_str());
     for (const Player& p : players_) {
@@ -431,6 +464,9 @@ void Gameplay::drawReady() {
     font_.print(64, 336, white, 1, "A/START play   Up/Down chart   Z autoplay");
     if (players_.size() > 1) font_.print(64, 352, white, 1, "Y remove P2   X change P2's chart");
     font_.print(64, 368, white, 1, "Left/Right offset %+.0f ms (lower it if steps are late)", offset_s_ * 1000);
+    font_.print(64, 400, grey, 1, "library: %d packs, %d songs, %d skipped, scan %lu ms",
+                (int)library_.packs.size(), (int)songs_.size(), (int)library_.warnings.size(),
+                (unsigned long)(scan_us_ / 1000));
     font_.print(64, 416, grey, 1, "%s   B next test   START+Z 2 s exit", video_.modeName());
 }
 

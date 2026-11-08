@@ -222,7 +222,7 @@ ddr-wii/
 │   │   │   ├── chart/  MsdFile.*  SmLoader.*  SscLoader.*  NoteData.*  Chart.*  PackIni.*  StringUtil.*
 │   │   │   ├── timing/ TimingData.*  (later) SongClock.h (interface)
 │   │   │   ├── judge/  (later) Judge.*  Score.*
-│   │   │   └── songs/  (later) SongLibrary.*  HighScores.*  Config.*
+│   │   │   └── songs/  SongLibrary.*  (later) HighScores.*  Config.*
 │   │   ├── platform/wii/         # libogc / GRRLIB wrappers: WiiVideo.*
 │   │   │                         #   (later) WiiInput.*  WiiAudio.*  WiiFs.*  WiiSystem.*
 │   │   ├── render/               # GRRLIB drawing: ArrowArt.*  Font.*  Draw.*

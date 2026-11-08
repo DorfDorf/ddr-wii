@@ -1,0 +1,10 @@
+#TITLE:Doubles only;
+#OFFSET:0;
+#BPMS:0=120;
+#MUSIC:d.ogg;
+#NOTES:dance-double::Hard:8:0:
+0100
+0010
+0001
+1000
+;
