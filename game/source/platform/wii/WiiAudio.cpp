@@ -5,7 +5,10 @@
 #include <gccore.h>
 #include <ogc/lwp_watchdog.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <tremor/ivorbisfile.h>
 #include <unistd.h>
 
 #include "core/audio/WavFile.h"
@@ -34,6 +37,121 @@ volatile u32 g_tick_count = 0;   // ASND_GetTickCounterVoice(0) at that tick
 volatile u32 g_tick_reports = 0;
 volatile u32 g_underruns = 0;
 volatile u32 g_ring_min = N;
+
+// ---- Sources: something that produces 16-bit PCM frames ----
+
+struct Source {
+    u32 rate = 0;
+    int channels = 0;
+    u32 total_frames = 0;
+    bool little_endian = false;   // WAV data is LE; decoders write the CPU's order (BE)
+    virtual ~Source() {}
+    // Writes up to `frames` frames to dst; returns how many (fewer only at the end).
+    virtual u32 read(u8* dst, u32 frames) = 0;
+};
+
+// WAV: streamed from the SD card (a 5-minute WAV is ~55 MB, too big to keep in memory).
+struct WavSource : Source {
+    FILE* f = nullptr;
+    u32 left = 0;
+
+    explicit WavSource(FILE* file) : f(file) {}
+    ~WavSource() override { fclose(f); }
+
+    const char* open() {
+        u8 head[4096];
+        const size_t n = fread(head, 1, sizeof head, f);
+        fseek(f, 0, SEEK_END);
+        const long size = ftell(f);
+        audio::WavInfo info;
+        if (!audio::parseWavHeader(head, n, size > 0 ? (u64)size : 0, info))
+            return "not a 16-bit PCM WAV";
+        fseek(f, info.data_offset, SEEK_SET);
+        rate = info.rate;
+        channels = info.channels;
+        total_frames = left = info.frames();
+        little_endian = true;
+        return nullptr;
+    }
+    u32 read(u8* dst, u32 frames) override {
+        if (frames > left) frames = left;
+        const u32 got = frames ? fread(dst, 2 * channels, frames, f) : 0;
+        left = got < frames ? 0 : left - got;
+        return got;
+    }
+};
+
+// OGG Vorbis: the whole file is read into memory first (no SD reads while playing,
+// doc 06 §4), then decoded on the fly with Tremor (integer decoder).
+struct OggSource : Source {
+    u8* data = nullptr;
+    size_t size = 0, pos = 0;
+    OggVorbis_File vf;
+    bool vf_open = false;
+
+    static size_t cbRead(void* ptr, size_t sz, size_t n, void* src) {
+        OggSource* s = (OggSource*)src;
+        size_t bytes = sz * n;
+        if (bytes > s->size - s->pos) bytes = s->size - s->pos;
+        memcpy(ptr, s->data + s->pos, bytes);
+        s->pos += bytes;
+        return sz ? bytes / sz : 0;
+    }
+    static int cbSeek(void* src, ogg_int64_t off, int whence) {
+        OggSource* s = (OggSource*)src;
+        ogg_int64_t base = 0;
+        if (whence == SEEK_CUR) base = (ogg_int64_t)s->pos;
+        if (whence == SEEK_END) base = (ogg_int64_t)s->size;
+        const ogg_int64_t p = base + off;
+        if (p < 0 || p > (ogg_int64_t)s->size) return -1;
+        s->pos = (size_t)p;
+        return 0;
+    }
+    static long cbTell(void* src) { return (long)((OggSource*)src)->pos; }
+
+    ~OggSource() override {
+        if (vf_open) ov_clear(&vf);
+        free(data);
+    }
+    const char* open(FILE* f) {
+        fseek(f, 0, SEEK_END);
+        const long len = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        data = len > 0 ? (u8*)malloc(len) : nullptr;
+        const bool ok = data && fread(data, 1, len, f) == (size_t)len;
+        fclose(f);
+        if (!ok) return data ? "SD read failed" : "out of memory";
+        size = len;
+        const ov_callbacks cb = {cbRead, cbSeek, nullptr, cbTell};
+        if (ov_open_callbacks(this, &vf, nullptr, 0, cb) != 0) return "not an OGG Vorbis file";
+        vf_open = true;
+        const vorbis_info* vi = ov_info(&vf, -1);
+        if (!vi || vi->channels < 1 || vi->channels > 2) return "OGG: only mono or stereo";
+        rate = vi->rate;
+        channels = vi->channels;
+        const ogg_int64_t total = ov_pcm_total(&vf, -1);
+        total_frames = total > 0 ? (u32)total : 0;
+        return nullptr;
+    }
+    u32 read(u8* dst, u32 frames) override {
+        const u32 frame_bytes = 2 * channels;
+        const u32 want = frames * frame_bytes;
+        u32 bytes = 0;
+        while (bytes < want) {
+            int section;
+            const long n = ov_read(&vf, (char*)dst + bytes, want - bytes, &section);
+            if (n == OV_HOLE) continue;   // a gap in the stream: keep going
+            if (n <= 0) break;            // end of file or a fatal error
+            bytes += n;
+        }
+        return bytes / frame_bytes;
+    }
+};
+
+bool endsWith(const char* s, const char* ext) {
+    const size_t n = strlen(s), m = strlen(ext);
+    return n >= m && strcasecmp(s + n - m, ext) == 0;
+}
 
 }  // namespace
 
@@ -83,28 +201,27 @@ void AudioStream::voiceCallback(s32 voice) {
 }
 
 void AudioStream::fillOnce() {
-    FILE* f = (FILE*)file_;
+    Source* src = (Source*)source_;
     while (!g_eof && g_filled - g_finished < (u32)N) {
         const u32 i = g_filled % N;
-        const u32 want = total_frames_ - frames_read_ < kChunkFrames ? total_frames_ - frames_read_
-                                                                     : kChunkFrames;
         const u64 t0 = gettime();
-        const u32 got = want ? fread(g_buf[i], 2 * channels_, want, f) : 0;
+        const u32 got = src->read(g_buf[i], kChunkFrames);
         const u32 us = ticks_to_microsecs(gettime() - t0);
         if (us > read_max_us_) read_max_us_ = us;
+        decode_us_ += us;
         if (got == 0) {
             g_eof = true;
             break;
         }
         frames_read_ += got;
-        const u32 bytes = got * 2 * channels_;
+        const u32 bytes = got * 2 * src->channels;
         const u32 padded = (bytes + 31) & ~31u;
         memset(g_buf[i] + bytes, 0, padded - bytes);
         DCFlushRange(g_buf[i], padded);   // the DSP reads main memory, not the CPU cache
         g_bytes[i] = padded;
         g_frames[i] = got;
         g_filled = g_filled + 1;          // publish after the data is in memory
-        if (got < want || frames_read_ >= total_frames_) g_eof = true;
+        if (got < kChunkFrames) g_eof = true;
     }
 }
 
@@ -125,23 +242,29 @@ bool AudioStream::open(const char* path) {
         error_ = "can't open file (SD card / path?)";
         return false;
     }
-    u8 head[4096];
-    const size_t n = fread(head, 1, sizeof head, f);
-    fseek(f, 0, SEEK_END);
-    const long size = ftell(f);
-    audio::WavInfo info;
-    if (!audio::parseWavHeader(head, n, size > 0 ? (u64)size : 0, info)) {
-        fclose(f);
-        error_ = "not a 16-bit PCM WAV";
+    Source* src;
+    const char* err;
+    if (endsWith(path, ".ogg")) {
+        OggSource* o = new OggSource;   // open() closes f
+        src = o;
+        err = o->open(f);
+    } else {
+        WavSource* w = new WavSource(f);   // owns f
+        src = w;
+        err = w->open();
+    }
+    if (err) {
+        delete src;
+        error_ = err;
         return false;
     }
-    fseek(f, info.data_offset, SEEK_SET);
-    file_ = f;
-    rate_ = info.rate;
-    channels_ = info.channels;
-    total_frames_ = info.frames();
+    source_ = src;
+    rate_ = src->rate;
+    channels_ = src->channels;
+    total_frames_ = src->total_frames;
     frames_read_ = 0;
     read_max_us_ = 0;
+    decode_us_ = 0;
     error_ = "";
 
     g_active = false;
@@ -165,8 +288,10 @@ bool AudioStream::open(const char* path) {
 }
 
 void AudioStream::play() {
-    if (!file_ || playing_ || g_filled == 0) return;
-    const s32 fmt = channels_ == 2 ? VOICE_STEREO_16BIT_LE : VOICE_MONO_16BIT_LE;
+    if (!source_ || playing_ || g_filled == 0) return;
+    const bool le = ((Source*)source_)->little_endian;
+    const s32 fmt = channels_ == 2 ? (le ? VOICE_STEREO_16BIT_LE : VOICE_STEREO_16BIT)
+                                   : (le ? VOICE_MONO_16BIT_LE : VOICE_MONO_16BIT);
     const u32 level = IRQ_Disable();
     g_ring_min = N;
     ASND_SetVoice(0, fmt, rate_, 0, g_buf[0], g_bytes[0], 255, 255, voiceCallback);
@@ -180,13 +305,13 @@ void AudioStream::play() {
 }
 
 void AudioStream::close() {
-    if (!file_) return;
+    if (!source_) return;
     g_active = false;
     ASND_StopVoice(0);
     stop_ = true;
     LWP_JoinThread((lwp_t)lwp_, nullptr);
-    fclose((FILE*)file_);
-    file_ = nullptr;
+    delete (Source*)source_;
+    source_ = nullptr;
     playing_ = false;
 }
 
@@ -215,6 +340,8 @@ AudioStream::Stats AudioStream::stats() const {
     s.underruns = g_underruns;
     s.ring_min = g_ring_min;
     s.read_max_us = read_max_us_;
+    s.decode_us = decode_us_;
+    s.frames_read = frames_read_;
     s.eof = g_eof;
     s.finished = g_eof && g_queued == g_filled;
     return s;

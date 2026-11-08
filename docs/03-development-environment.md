@@ -146,6 +146,8 @@ tools/stage-sd.sh "$(cygpath -u "$USERPROFILE")/Dolphin-x64/User/Load/WiiSDSync"
 make -C game run-dolphin DOLPHIN_ARGS='-C Dolphin.Core.WiiSDCard=True -C Dolphin.Core.WiiSDCardEnableFolderSync=True'
 ```
 
+`tools/stage-sd.sh` also makes the M4b click tracks: Python 3 for the WAVs, ffmpeg (`winget install Gyan.FFmpeg`) for the OGG/MP3 copies.
+
 If your build doesn't have folder sync, the fallback is the `sd.raw` image in `<User>\Wii\sd.raw`, mounted with a FAT tool. Folder sync is much easier.
 
 ### 4.4 Map the keyboard to the "dance pad"

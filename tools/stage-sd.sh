@@ -44,4 +44,15 @@ for rate in 48000 44100; do
     if [ -z "$py" ]; then echo "  (no python: skipped $out)"; continue; fi
     "$py" "$(winpath "$root/tools/make-click-track.py")" "$(winpath "$out")" --rate "$rate"
 done
+
+# Encoded copies for the decoders (doc 05 M4b), made from the 44.1 kHz WAV with ffmpeg
+# (winget install Gyan.FFmpeg; found on PATH or in winget's package folder).
+ffmpeg="$(command -v ffmpeg || true)"
+[ -n "$ffmpeg" ] || ffmpeg="$(ls /c/Users/*/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg*/*/bin/ffmpeg.exe 2>/dev/null | head -n 1)"
+wav="$dest/ddrwii/test/click120-44k.wav"
+out="$dest/ddrwii/test/click120-44k.ogg"
+if [ -f "$out" ]; then :
+elif [ -z "$ffmpeg" ] || [ ! -f "$wav" ]; then echo "  (no ffmpeg or WAV: skipped $out)"
+else "$ffmpeg" -loglevel error -y -i "$(winpath "$wav")" -c:a libvorbis -q:a 6 "$(winpath "$out")" && echo "  $out"
+fi
 echo "Done. Copy the apps/ and ddrwii/ folders to the root of the SD card."

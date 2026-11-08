@@ -23,6 +23,7 @@ struct Track { const char* path; const char* name; };
 constexpr Track kTracks[] = {
     {"sd:/ddrwii/test/click120-48k.wav", "48 kHz"},
     {"sd:/ddrwii/test/click120-44k.wav", "44.1 kHz"},
+    {"sd:/ddrwii/test/click120-44k.ogg", "OGG 44.1 kHz"},
 };
 // SongClock comes from ASND's mixing ticks; "buffers-clock" is the file content actually
 // handed over (retired buffers) minus SongClock at that moment. Its average is a fixed
@@ -52,6 +53,7 @@ void AudioClockTest::start() {
     seconds_ = 0;
     if (stream_.open(kTracks[file_].path)) stream_.play();
     start_cpu_us_ = second_start_us_ = cpuUs();
+    video_.resetStats();   // the preload above may have cost a frame; count from here
 }
 
 bool AudioClockTest::frame() {
@@ -153,8 +155,9 @@ void AudioClockTest::draw(s64 song_us) {
     GRRLIB_SetAntiAliasing(false);
     const wii::AudioStream::Stats st = stream_.stats();
     // Kept above y = 462 (the owner's TV overscan cuts the bottom rows).
-    font_.print(40, 250, white, 1, "ddr-wii M4b audio clock   %s   track %s", video_.modeName(),
-                kTracks[file_].name);
+    const u32 dropped = video_.stats().dropped_total;   // frames over 1.5x the refresh period
+    font_.print(40, 250, dropped ? warn : white, 1, "M4b audio clock  %s  %s  dropped %lu", video_.modeName(),
+                kTracks[file_].name, (unsigned long)dropped);
     if (!stream_.isOpen()) {
         font_.print(40, 274, bad, 1, "%s: %s", kTracks[file_].path, stream_.error());
         font_.print(40, 292, grey, 1, "Run tools/stage-sd.sh, or for Dolphin see doc 03 4.3.");
@@ -176,12 +179,16 @@ void AudioClockTest::draw(s64 song_us) {
                     "frame jitter max %5.2f ms  last 1 s %5.2f ms (target < 1)", jitter_max_us_ / 1e3,
                     jitter_sec_us_ / 1e3);
         font_.print(40, 364, st.underruns ? bad : white, 1,
-                    "underruns %lu  ring min %lu/%d  SD read max %5.1f ms  snaps %lu",
-                    (unsigned long)st.underruns, (unsigned long)st.ring_min, wii::AudioStream::kChunks,
-                    st.read_max_us / 1e3, (unsigned long)clock_.snaps());
+                    "underruns %lu  ring min %lu/%d  snaps %lu", (unsigned long)st.underruns,
+                    (unsigned long)st.ring_min, wii::AudioStream::kChunks, (unsigned long)clock_.snaps());
+        // Share of real time the fill thread spends reading/decoding.
+        const double audio_us = st.frames_read * 1e6 / stream_.rate();
+        font_.print(40, 382, white, 1, "read/decode max %5.1f ms per %lu frames   CPU %4.1f%%",
+                    st.read_max_us / 1e3, (unsigned long)wii::AudioStream::kChunkFrames,
+                    audio_us > 0 ? st.decode_us * 100.0 / audio_us : 0.0);
     }
-    font_.print(40, 400, grey, 1, "A switch 48 / 44.1 kHz   START restart   B next test");
-    font_.print(40, 418, grey, 1, "START+Z 2 s exit");
+    font_.print(40, 410, grey, 1, "A next track (48k WAV, 44.1k WAV, OGG)   START restart");
+    font_.print(40, 428, grey, 1, "B next test   START+Z 2 s exit");
     GRRLIB_SetAntiAliasing(true);
 }
 
