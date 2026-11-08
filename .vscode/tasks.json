@@ -1,0 +1,44 @@
+{
+  "version": "2.0.0",
+  "options": {
+    "env": { "CHERE_INVOKING": "1", "MSYSTEM": "MSYS" }
+  },
+  "tasks": [
+    {
+      "label": "padtest: build",
+      "type": "process",
+      "command": "C:/devkitPro/msys2/usr/bin/bash.exe",
+      "args": ["-lc", "make -C tools/padtest"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": {
+        "base": "$gcc",
+        "fileLocation": ["autoDetect", "${workspaceFolder}/tools/padtest/build"]
+      }
+    },
+    {
+      "label": "padtest: run in Dolphin",
+      "type": "process",
+      "command": "C:/devkitPro/msys2/usr/bin/bash.exe",
+      "args": ["-lc", "make -C tools/padtest run-dolphin"],
+      "group": "test",
+      "problemMatcher": {
+        "base": "$gcc",
+        "fileLocation": ["autoDetect", "${workspaceFolder}/tools/padtest/build"]
+      }
+    },
+    {
+      "label": "padtest: clean",
+      "type": "process",
+      "command": "C:/devkitPro/msys2/usr/bin/bash.exe",
+      "args": ["-lc", "make -C tools/padtest clean"],
+      "problemMatcher": []
+    },
+    {
+      "label": "padtest: send to Wii (wiiload)",
+      "type": "process",
+      "command": "C:/devkitPro/msys2/usr/bin/bash.exe",
+      "args": ["-lc", "make -C tools/padtest run"],
+      "problemMatcher": []
+    }
+  ]
+}

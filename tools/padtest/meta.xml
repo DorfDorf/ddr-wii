@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<app version="1">
+  <name>DDR Pad Test</name>
+  <coder>ddr-wii</coder>
+  <version>0.1</version>
+  <short_description>GameCube port / dance mat diagnostic</short_description>
+  <long_description>Shows each GameCube port's SI device type, live arrow states, the most arrows held at once and the PAD sampling interval. Hold START+Z for 2 seconds to exit.</long_description>
+</app>

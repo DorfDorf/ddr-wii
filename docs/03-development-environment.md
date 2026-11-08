@@ -2,7 +2,18 @@
 
 *Checked 2026-11-08. Markers: **[doc]** verified in official docs or repos today. **[mem]** from prior knowledge, because devkitpro.org and dolphin-emu.org refused automated fetches today, so check these against the live page. **[exp]** confirm by doing.*
 
-**Nothing in this guide has been installed yet.** I checked: `C:\devkitPro` doesn't exist, `DEVKITPRO`/`DEVKITPPC` are unset, and there's no Dolphin install. Every install step below needs your go-ahead (or you can run it yourself).
+**Installed state (M1, 2026-11-08).** Everything in §1–5 is set up, and `template.dol` and `padtest.dol` both boot in Dolphin. What's actually installed, and what turned out different from the plan below:
+
+| Item | Actual |
+|---|---|
+| devkitPro | Updater v3.0.3 → `C:\devkitPro`. devkitPPC r51 (GCC 16.2.0), libogc 3.2.1, wii-examples 20260510 |
+| Libraries + GRRLIB | Installed by [`tools/setup-devkitpro.sh`](../tools/setup-devkitpro.sh) (re-runnable). GRRLIB v4.6.1+ (master) in the MSys2 home `~/GRRLIB`. **Its Makefile is in the inner `GRRLIB/` folder**, so the command is `make -C ~/GRRLIB/GRRLIB clean all install` (the README's `make -C GRRLIB` assumes you're in the clone's parent) |
+| Official template | Installed by `wii-examples` at `C:\devkitPro\examples\wii\templates\makefile\application` (not `templates/makefile`). Built from a copy in `build-experiments/template/` (gitignored) |
+| Dolphin | **2609a** portable 7z, unpacked to `C:\Users\haler\Dolphin-x64` with `portable.txt` (user folder = `Dolphin-x64\User`). winget only has 5.0 (2016), so don't use it. The first launch shows an *Allow Usage Statistics Reporting* dialog (answered No) |
+| Build + run | `make -C tools/padtest run-dolphin` → [`tools/run-dolphin.sh`](../tools/run-dolphin.sh). It kills any open Dolphin, then boots the `.dol` with `-b -e` through `cmd /c start` so make returns at once. Edit → build → launch takes about 1 s. `DOLPHIN=/path/to/Dolphin.exe` overrides the default location |
+| VS Code | `.vscode/tasks.json` (padtest: build / run in Dolphin / clean / send to Wii) and `c_cpp_properties.json` |
+
+Paths in the rest of this guide that say `C:/Program Files/Dolphin` should read `C:/Users/haler/Dolphin-x64`.
 
 ---
 
