@@ -114,6 +114,7 @@ Windows (StepMania defaults, verified in SM 3.9 `PrefsManager.cpp:87-92`), all a
 - **Jumps:** notes on the same row are judged individually, but combo and score treat the row as one unit (worst judgement of the row). A row completes when all its lanes are hit or missed.
 - **Holds:** the head is judged like a tap. While held, the hold is OK. If released for longer than 0.250 s before the tail, it's NG. Rolls (`4`) come later.
 - Show the timing error (ms, early or late) for calibration.
+- **Implementation (M4c):** `core/game/Judge`, one per player. It takes song seconds, so the caller converts `LaneEvent` timestamps with SongClock and the offsets. Dance points are per row (Marvelous/Perfect 2, Great 1, the rest 0) plus 2 per held hold. The early-hit rule follows ITGmania v1.3.0 `Player.cpp` [src]: only one-note rows, the first early bad grade is kept, and after that only a Great-or-better re-hit replaces it. `MakeAutoplay` gives the perfect inputs for the autoplay test and debug mode.
 
 ### 3.5 Latency budget and calibration
 

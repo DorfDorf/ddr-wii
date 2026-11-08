@@ -38,6 +38,7 @@
 #include "../source/core/input/InputFilter.h"
 #include "../source/core/audio/WavFile.h"
 #include "../source/core/timing/SongClock.h"
+#include "../source/core/game/Judge.h"
 
 using namespace ddr;
 
@@ -776,6 +777,206 @@ static void TestSongClock() {
   CHECK(h.snaps() == 2 && h.now(6100000) == 0);
 }
 
+
+// ---------------------------------------------------------------------------
+// Judge (M4c, doc 06 §3.4)
+
+static ddr::Note JNote(int row, double time, int lane, double end_time = -1) {
+  ddr::Note n;
+  n.row = row;
+  n.beat = row / 48.0;
+  n.time = time;
+  n.lane = lane;
+  if (end_time >= 0) {
+    n.type = ddr::NoteType::HoldHead;
+    n.endTime = end_time;
+  }
+  n.endRow = row;
+  return n;
+}
+
+static void TestJudge() {
+  std::printf("[unit] Judge\n");
+  using game::Grade;
+  using game::HoldResult;
+  using game::Judge;
+  const game::Windows w;
+  CHECK(game::GradeForError(0.0, w) == Grade::Marvelous);
+  CHECK(game::GradeForError(0.0225, w) == Grade::Marvelous);
+  CHECK(game::GradeForError(0.0226, w) == Grade::Perfect);
+  CHECK(game::GradeForError(0.090, w) == Grade::Great);
+  CHECK(game::GradeForError(0.135, w) == Grade::Good);
+  CHECK(game::GradeForError(0.180, w) == Grade::Boo);
+  CHECK(game::GradeForError(0.181, w) == Grade::None);
+
+  {  // Closest note: a press between two close notes takes the nearer, the other misses.
+    Judge j;
+    j.load({JNote(0, 1.0, 0), JNote(12, 1.1, 0)}, 4);
+    j.press(0, 1.07);
+    CHECK(j.notes()[1].grade == Grade::Perfect);
+    CHECK(j.notes()[0].grade == Grade::None);
+    j.update(1.2);
+    CHECK(j.notes()[0].grade == Grade::Miss);
+    CHECK(j.finished());
+    CHECK(j.score().combo == 0 && j.score().max_combo == 1);
+  }
+  {  // Stray presses and other lanes do nothing.
+    Judge j;
+    j.load({JNote(0, 1.0, 1)}, 4);
+    j.press(1, 0.5);
+    j.press(0, 1.0);
+    j.press(7, 1.0);
+    CHECK(j.notes()[0].grade == Grade::None);
+    j.press(1, 1.01);
+    CHECK(j.notes()[0].grade == Grade::Marvelous);
+  }
+  {  // Early-hit rule: an early Boo keeps the note; a better re-hit replaces it.
+    Judge j;
+    j.load({JNote(0, 1.0, 0)}, 4);
+    j.press(0, 0.86);
+    CHECK(j.notes()[0].grade == Grade::None && j.notes()[0].early == Grade::Boo);
+    j.release(0, 0.9);
+    j.press(0, 1.01);
+    CHECK(j.notes()[0].grade == Grade::Marvelous);
+    CHECK(j.score().rows[(int)Grade::Marvelous] == 1 && j.score().combo == 1);
+  }
+  {  // ... and if the note passes unhit, it keeps the early grade, not a Miss.
+    Judge j;
+    j.load({JNote(0, 1.0, 0)}, 4);
+    j.press(0, 0.83);   // Boo, early
+    j.release(0, 0.85);
+    j.press(0, 0.87);   // Good, early: not used, the first early grade stays
+    j.release(0, 0.88);
+    j.press(0, 1.15);   // Boo, late: ignored after an early hit
+    j.update(1.2);
+    CHECK(j.notes()[0].grade == Grade::Boo);
+    CHECK_NEAR(j.notes()[0].offset, -0.17, 1e-9);
+    CHECK(j.score().rows[(int)Grade::Boo] == 1 && j.score().rows[(int)Grade::Miss] == 0);
+  }
+  {  // With the rule off, an early Boo uses the note up.
+    Judge j;
+    Judge::Options o;
+    o.early_hit_rule = false;
+    j.load({JNote(0, 1.0, 0)}, 4, o);
+    j.press(0, 0.86);
+    CHECK(j.notes()[0].grade == Grade::Boo);
+  }
+  {  // Jumps: the rule doesn't apply, and the row counts once with its worst grade.
+    Judge j;
+    j.load({JNote(0, 1.0, 0), JNote(0, 1.0, 3), JNote(48, 2.0, 1)}, 4);
+    j.press(0, 0.86);
+    CHECK(j.notes()[0].grade == Grade::Boo);
+    CHECK(j.score().rows[(int)Grade::Boo] == 0);   // row not done yet
+    j.press(3, 1.0);
+    CHECK(j.score().rows[(int)Grade::Boo] == 1 && j.score().combo == 0);
+    j.press(1, 2.05);
+    CHECK(j.score().rows[(int)Grade::Great] == 1 && j.score().combo == 1);
+    CHECK(j.finished());
+    // Points: Boo row 0 + Great row 1 out of 2 rows x 2.
+    CHECK(j.score().dance_points == 1 && j.score().possible_points == 4);
+    CHECK_NEAR(j.score().percent(), 25.0, 1e-9);
+    CHECK(j.score().hits == 3);
+  }
+  {  // Holds: a short release is fine, a long one lets go, a missed head is NG.
+    Judge j;
+    j.load({JNote(0, 1.0, 0, 3.0), JNote(0, 1.0, 1, 3.0), JNote(0, 1.0, 2, 3.0)}, 4);
+    j.press(0, 1.0);
+    j.press(1, 1.0);
+    j.release(0, 1.5);
+    j.press(0, 1.7);    // released for 0.2 s: still OK
+    j.release(1, 2.0);  // released for good
+    j.update(2.24);
+    CHECK(j.notes()[1].hold_result == HoldResult::None);
+    j.update(2.26);
+    CHECK(j.notes()[1].hold_result == HoldResult::LetGo);
+    CHECK(j.notes()[2].hold_result == HoldResult::LetGo);   // head missed
+    CHECK(!j.finished());
+    j.update(3.0);
+    CHECK(j.notes()[0].hold_result == HoldResult::Held);
+    CHECK(j.finished());
+    CHECK(j.score().holds_held == 1 && j.score().holds_let_go == 2);
+  }
+  {  // A release within hold_ok of the tail is still OK.
+    Judge j;
+    j.load({JNote(0, 1.0, 0, 2.0)}, 4);
+    j.press(0, 1.0);
+    j.release(0, 1.9);
+    j.update(5.0);
+    CHECK(j.notes()[0].hold_result == HoldResult::Held);
+    CHECK_NEAR(j.score().percent(), 100.0, 1e-9);
+  }
+  {  // Held miss: a note passes while its lane is held down.
+    Judge j;
+    j.load({JNote(0, 1.0, 2)}, 4);
+    j.press(2, 0.2);
+    j.update(2.0);
+    CHECK(j.notes()[0].grade == Grade::Miss && j.score().held_misses == 1);
+  }
+  {  // Only judgable taps and heads count.
+    std::vector<ddr::Note> v = {JNote(0, 1.0, 0), JNote(0, 1.0, 1), JNote(0, 1.0, 2)};
+    v[1].type = ddr::NoteType::Mine;
+    v[2].judgable = false;
+    Judge j;
+    j.load(v, 4);
+    CHECK(j.notes().size() == 1);
+  }
+  {  // Events: a note, then its row.
+    Judge j;
+    j.load({JNote(0, 1.0, 0)}, 4);
+    j.press(0, 1.03);
+    CHECK(j.events().size() == 2);
+    CHECK(j.events()[0].kind == game::JudgeEvent::kNote && j.events()[0].grade == Grade::Perfect);
+    CHECK_NEAR(j.events()[0].offset, 0.03, 1e-9);
+    CHECK(j.events()[1].kind == game::JudgeEvent::kRow);
+  }
+}
+
+// Autoplay over every chart in the corpus must be 100% Marvelous (doc 05 M4c). This is
+// what catches step-time and note-time mistakes before the Wii is involved.
+static void TestAutoplayCorpus(const std::string& dir) {
+  std::vector<std::string> index;
+  if (!ReadLines(dir + "/expected/index.txt", index)) return;
+  size_t charts = 0, notes = 0, holds = 0, perfect = 0;
+  for (const std::string& rel : index) {
+    if (rel.empty() || rel[0] == '#') continue;
+    Song song;
+    LoadSongFile(dir + "/corpus/" + rel, song);
+    for (size_t ci = 0; ci < song.charts.size(); ++ci) {
+      const Chart& c = song.charts[ci];
+      game::Judge j;
+      j.load(c.notes, c.numTracks);
+      for (const game::AutoStep& s : game::MakeAutoplay(j)) {
+        if (s.pressed)
+          j.press(s.lane, s.time);
+        else
+          j.release(s.lane, s.time);
+      }
+      j.update(1e9);
+      const game::Score& sc = j.score();
+      int rows = 0;
+      for (int g = 0; g < game::kNumGrades; ++g) rows += sc.rows[g];
+      const bool ok = j.finished() && rows == sc.rows[(int)game::Grade::Marvelous] &&
+                      sc.holds_let_go == 0 && sc.max_combo == rows && sc.held_misses == 0 &&
+                      (sc.possible_points == 0 || sc.percent() == 100.0);
+      ++g_checks;
+      if (!ok) {
+        ++g_failures;
+        std::printf("  FAIL autoplay %s chart %zu: %d rows, %d Marvelous, %d let go, "
+                    "combo %d, %.2f%%\n", rel.c_str(), ci, rows,
+                    sc.rows[(int)game::Grade::Marvelous], sc.holds_let_go, sc.max_combo,
+                    sc.percent());
+      } else {
+        ++perfect;
+      }
+      ++charts;
+      notes += j.notes().size();
+      holds += sc.holds_held + sc.holds_let_go;
+    }
+  }
+  std::printf("[autoplay] %zu/%zu charts 100%% Marvelous, %zu notes, %zu holds\n", perfect,
+              charts, notes, holds);
+}
+
 int main(int argc, char** argv) {
   std::string dir = ".";
   int fuzzIterations = 3000;
@@ -797,6 +998,8 @@ int main(int argc, char** argv) {
   TestInputFilter();
   TestWavFile();
   TestSongClock();
+  TestJudge();
+  TestAutoplayCorpus(dir);
   RunFuzz(dir, fuzzIterations);
 
   std::printf("\n%d checks, %d failures%s\n", g_checks, g_failures,

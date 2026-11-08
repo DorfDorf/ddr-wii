@@ -153,6 +153,7 @@ What it shows:
 | **Success** | Autoplay gives 100% Marvelous. A human gets consistent ms error (a stable mean, which is the latency to calibrate away). Holds work. A human's judgements are the same with autoplay players on screen as without |
 | **Risks** | Input-to-song-time conversion bugs (caught by autoplay) |
 | **Reuse** | Dance Clone judgement/jump logic as reference. ITGmania's early-hit rule (doc 06 §3.4), ported from `v1.3.0` |
+| **Status** | **Step 1 of 4 built** (branch `m4c-judge`, 2026-11-08): `core/game/Judge` judges one player's chart and keeps their score, PC-tested. It has the doc 06 §3.4 windows, the closest unjudged note per lane, the early-hit rule (on by default), jumps counted once with their worst grade, holds (0.25 s release tolerance; rolls are treated as holds for now), held misses, combo (Good breaks it), dance points and the mean/spread of ms error. Mines, lifts and fakes are not judged yet. `MakeAutoplay` turns a chart into perfect presses: **42/42 corpus charts give 100% Marvelous** (15 107 notes, 613 holds). **Next:** (2) a generated 120 BPM test song, (3) the gameplay screen, (4) results and 2P |
 
 ## M5 — Playable prototype
 
