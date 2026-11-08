@@ -124,7 +124,7 @@ Windows (StepMania defaults, verified in SM 3.9 `PrefsManager.cpp:87-92`), all a
 | Audio output (DSP buffer + TV audio) | tens of ms | Absorbed by `globalOffset` |
 | Video (render → scan-out → TV processing) | 1–3 frames + TV lag (often 20–100 ms on LCDs) | Separate `visualOffset`. Use the TV's "Game mode" |
 
-A **calibration screen** (M5) plays a click track with flashing arrows. The player steps in time, and we average the error to set `globalOffset`. StepMania's equivalent is its global offset setting.
+A **calibration screen** (M5) plays a click track with flashing arrows. The player steps in time, and we average the error to set `globalOffset`. StepMania's equivalent is its global offset setting. **Built (M5 step 3):** `screens/OffsetCalibration`, opened with R on port 1 in song select. It loops the Click 120 OGG (beat 0 at sample 0). Each step on any lane of any port is turned into song time (SongClock, plus that port's `InputOffset`, without the global offset) and handed to `core/game/Calibration`, which matches it to the nearest beat. Steps more than 150 ms off a beat, and the second foot of a jump (within 60 ms), are ignored. The mean and spread are over the last 32 steps, and after 24 it offers `-mean` as the offset. START saves it to `config.ini` (or the current offset, if there aren't 24 steps yet). L/R nudge it by 5 ms, Z clears, B leaves without saving, and Y makes exact auto steps for testing. The arrows flash on each beat as a guide, but the player is told to follow the sound, because the flash carries the TV's video delay. `visualOffset` is still to do: it needs a second, picture-only pass.
 
 ## 4. Audio system
 
@@ -193,12 +193,12 @@ Options (scroll speed, global offset, calibration) reachable from Title.
 - **SongLibrary cache:** parsing headers for hundreds of songs from SD is slow, so cache `{path, mtime, title, artist, bpm range, difficulties}` in `sd:/ddrwii/cache.bin` **[exp: measure the scan time]**.
 - **Scoring (prototype):** "dance points" percentage, as in StepMania/ITG (Marvelous/Perfect = 100%, Great = 50%, Good/Boo/Miss = 0, holds OK = full credit) plus max combo and judgement counts. DDR-style money score can be added later (SM 3.9 `ScoreKeeperMAX2.cpp` as reference).
 - **High scores:** `scores.dat` is a small versioned binary or INI keyed by `songHash + difficulty`, storing the best percentage, combo and grade. It's written atomically (write a temp file, then rename).
-- **Settings:** `config.ini` holds `GlobalOffset`, `VisualOffset`, `DefaultSyncOffset` (`NULL` or `ITG`, for packs without `pack.ini`), `InputDebounceMs`, and per port (`[Port1]`…`[Port4]`) `LaneMap`, `InputOffset` and the last-used `ScrollSpeed`. See §11 for how ports become players.
+- **Settings:** `config.ini` holds `GlobalOffset`, `VisualOffset`, `DefaultSyncOffset` (`NULL` or `ITG`, for packs without `pack.ini`), `InputDebounceMs`, and per port (`[Port1]`…`[Port4]`) `LaneMap`, `InputOffset` and the last-used `ScrollSpeed`. See §11 for how ports become players. **Built (M5 step 3):** `core/config/Config` reads and writes `sd:/ddrwii/config.ini` with `[Options] GlobalOffset` (ms), `DefaultSyncOffset`, `InputDebounceMs` and `[PortN] InputOffset` (ms). Offsets are clamped to ±1 s, and bad or missing values keep the defaults. It's loaded at boot, before the pad debounce is set and the library is scanned, and written whole to `config.ini.tmp`, then renamed over the old file (libfat can't rename over a file, so the old one is removed first). `VisualOffset`, `ScrollSpeed` and `LaneMap` come when something uses them (step 4 for scroll speed).
 
 ## 8. Wii-specific lifecycle
 
 - Init order: `VIDEO`/GRRLIB → `PAD_Init` → `fatInitDefault()` (retry for up to ~2 s; Dance Clone uses `sleep(1)` as a workaround, `WiiOS.cpp:49-52`) → `ASND_Init` → load config.
-- **Reset/Power buttons:** register callbacks that only set a flag, then handle the flag in the main loop (Dance Clone's correct pattern, `WiiOS.cpp:28-66`). Check the current callback prototypes in `ogc/system.h` **[exp]**.
+- **Reset/Power buttons:** register callbacks that only set a flag, then handle the flag in the main loop (Dance Clone's correct pattern, `WiiOS.cpp:28-66`). Check the current callback prototypes in `ogc/system.h` **[exp]**. **Not built yet.** Without them, Dolphin's Stop waits for a shutdown the game never acknowledges, and has to be forced; its SD folder sync still writes back after a forced stop (checked 2026-11-08).
 - **Exit:** return from `main()` or call `exit(0)` to go back to HBC/Dolphin.
 - Memory: allocate large buffers (audio file, ring, textures) from MEM2 where possible. Watch the heap usage display in the debug overlay.
 
@@ -222,12 +222,13 @@ ddr-wii/
 │   │   │   ├── chart/  MsdFile.*  SmLoader.*  SscLoader.*  NoteData.*  Chart.*  PackIni.*  StringUtil.*
 │   │   │   ├── timing/ TimingData.*  (later) SongClock.h (interface)
 │   │   │   ├── judge/  (later) Judge.*  Score.*
-│   │   │   └── songs/  SongLibrary.*  (later) HighScores.*  Config.*
+│   │   │   ├── config/ Config.*
+│   │   │   └── songs/  SongLibrary.*  (later) HighScores.*
 │   │   ├── platform/wii/         # libogc / GRRLIB wrappers: WiiVideo.*
 │   │   │                         #   (later) WiiInput.*  WiiAudio.*  WiiFs.*  WiiSystem.*
 │   │   ├── render/               # GRRLIB drawing: ArrowArt.*  Font.*  Draw.*
 │   │   └── screens/  PlayfieldStress.*  RenderTest.*
-│   │                 Session.h  SongSelect.*  Gameplay.* (with results)
+│   │                 Session.h  SongSelect.*  Gameplay.* (with results)  OffsetCalibration.*
 │   │                 (later) Title.*  Options.*
 │   ├── data/                     # (later) small embedded assets (font, arrow atlas) → linked in
 │   └── tests/                    # host-side tests for core/ (built with g++ on the PC)

@@ -10,7 +10,7 @@
 // Controls, as on a dance mat in ITG: Left/Right move the wheel (held: repeat), Up/Down change
 // that player's difficulty, START opens a pack or picks the song. START on a port that hasn't
 // joined joins it as the next player. Debug: Z toggles that player's autoplay, X leaves,
-// Y on port 1 adds/removes an autoplay player, L/R on port 1 change the global offset.
+// Y on port 1 adds/removes an autoplay player, R on port 1 opens the offset calibration.
 #pragma once
 
 #include <gctypes.h>
@@ -28,10 +28,11 @@ class SongSelect {
 public:
     SongSelect(wii::Video& video, const wii::Input& input, const render::Font& font, Session& session);
 
-    // One frame of logic + drawing. Returns false when a song was picked (picked() is true)
-    // or the exit chord (START+Z for 2 s) was held.
+    // One frame of logic + drawing. Returns false when a song was picked (picked()), the
+    // calibration screen was asked for (calibrate()) or the exit chord (START+Z for 2 s) held.
     bool frame();
     bool picked() const { return picked_; }
+    bool calibrate() const { return calibrate_; }
 
 private:
     struct Item { int pack, song; };   // song -1: the pack's header
@@ -59,6 +60,7 @@ private:
     u32 frames_ = 0;
     u32 quit_frames_ = 0;
     bool picked_ = false;
+    bool calibrate_ = false;
 };
 
 }  // namespace screens

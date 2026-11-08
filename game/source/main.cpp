@@ -14,6 +14,7 @@
 #include "render/Font.h"
 #include "screens/AudioClockTest.h"
 #include "screens/Gameplay.h"
+#include "screens/OffsetCalibration.h"
 #include "screens/PlayfieldStress.h"
 #include "screens/RenderTest.h"
 #include "screens/Session.h"
@@ -42,9 +43,6 @@ bool runScene(wii::Video& video, wii::Input& input, Scene& scene, bool b_next = 
 int main(int, char**) {
     wii::Video video;
     if (!video.init()) return EXIT_FAILURE;
-    wii::Input input;
-    input.init();
-
     render::ArrowArt art;
     render::Font font;
     if (!art.create() || !font.create()) {
@@ -54,20 +52,31 @@ int main(int, char**) {
 
     fatInitDefault();   // SD card (sd:/); song select and the audio test report it if this failed
 
+    // config.ini first: it sets the pad debounce and the sync of packs without a Pack.ini.
     screens::Session session;
+    session.config_loaded = ddr::LoadConfig(screens::OffsetCalibration::kConfigPath, session.config);
+    wii::Input input;
+    input.init((u32)session.config.inputDebounceMs * 1000);
+
     const u64 t0 = ticks_to_microsecs(gettime());
-    session.scanned = ddr::ScanSongLibrary(kSongsRoot, session.library);
+    session.scanned = ddr::ScanSongLibrary(kSongsRoot, session.library, session.config.defaultSyncOffset);
     session.scan_us = ticks_to_microsecs(gettime()) - t0;
 
     int which = 0;
     for (;;) {
         bool next;
         if (which == 0) {
-            bool play;
+            bool play, calibrate;
             {
                 screens::SongSelect scene(video, input, font, session);
                 next = runScene(video, input, scene);
                 play = !next && scene.picked();
+                calibrate = !next && scene.calibrate();
+            }
+            if (calibrate) {
+                screens::OffsetCalibration cal(video, input, art, font, session);
+                runScene(video, input, cal, false);
+                continue;
             }
             if (play) {
                 screens::Gameplay game(video, input, art, font, session);

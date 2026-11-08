@@ -40,6 +40,8 @@
 #include "../source/core/timing/SongClock.h"
 #include "../source/core/game/Judge.h"
 #include "../source/core/songs/SongLibrary.h"
+#include "../source/core/config/Config.h"
+#include "../source/core/game/Calibration.h"
 
 using namespace ddr;
 
@@ -1058,6 +1060,76 @@ static void TestSongLibrary(const std::string& dir) {
         std::fabs(itg.packs[1].info.syncOffset + 0.009) < 1e-12);
 }
 
+// ---------------------------------------------------------------------------
+// config.ini and offset calibration (doc 05 M5 step 3)
+
+static void TestConfig(const std::string& dir) {
+  std::printf("[unit] config.ini\n");
+  Config c;
+  ParseConfig("[Options]\r\nGlobalOffset= -12.5 \r\nDefaultSyncOffset=itg\r\nInputDebounceMs=10\r\n"
+              "[Port2]\r\nInputOffset=4\r\n", c);
+  CHECK_NEAR(c.globalOffsetS, -0.0125, 1e-12);
+  CHECK(c.defaultSyncOffset == DefaultSyncOffset::ITG);
+  CHECK(c.inputDebounceMs == 10);
+  CHECK_NEAR(c.ports[1].inputOffsetS, 0.004, 1e-12);
+  CHECK_NEAR(c.ports[0].inputOffsetS, 0.0, 1e-12);
+
+  // Bad values keep what was there; offsets are clamped to +-1 s.
+  Config d = c;
+  ParseConfig("[Options]\nGlobalOffset=abc\nInputDebounceMs=500\nDefaultSyncOffset=maybe\n"
+              "[Port1]\nInputOffset=-5000\n", d);
+  CHECK_NEAR(d.globalOffsetS, -0.0125, 1e-12);
+  CHECK(d.inputDebounceMs == 10 && d.defaultSyncOffset == DefaultSyncOffset::ITG);
+  CHECK_NEAR(d.ports[0].inputOffsetS, -1.0, 1e-12);
+
+  // Write, then read back into defaults: the same values.
+  Config e;
+  ParseConfig(WriteConfigText(c), e);
+  CHECK_NEAR(e.globalOffsetS, c.globalOffsetS, 1e-9);
+  CHECK(e.defaultSyncOffset == c.defaultSyncOffset && e.inputDebounceMs == c.inputDebounceMs);
+  CHECK_NEAR(e.ports[1].inputOffsetS, 0.004, 1e-9);
+
+  // Save twice over the same file (the second rename replaces the first file), then load.
+  const std::string path = dir + "/build/config-test.ini";
+  std::remove(path.c_str());
+  Config none;
+  CHECK(!LoadConfig(path, none));
+  CHECK(SaveConfig(path, d));
+  CHECK(SaveConfig(path, c));
+  Config f;
+  CHECK(LoadConfig(path, f));
+  CHECK_NEAR(f.globalOffsetS, -0.0125, 1e-9);
+  CHECK_NEAR(f.ports[0].inputOffsetS, 0.0, 1e-9);
+  FILE* tmp = std::fopen((path + ".tmp").c_str(), "rb");
+  CHECK(tmp == nullptr);   // the temporary file was renamed away
+  if (tmp) std::fclose(tmp);
+  std::remove(path.c_str());
+}
+
+static void TestCalibration() {
+  std::printf("[unit] calibration\n");
+  game::Calibration c(0.5, 0.0);
+  CHECK(!c.press(-0.3));             // before the first beat
+  CHECK(c.press(1.020));             // beat 2, 20 ms late
+  CHECK(!c.press(1.040));            // the other foot of a jump
+  CHECK(!c.press(1.75 - 0.01));      // halfway between beats: too far from either
+  CHECK_NEAR(c.lastError(), 0.020, 1e-12);
+  CHECK(c.press(1.490));             // beat 3, 10 ms early
+  CHECK_NEAR(c.mean(), 0.005, 1e-12);
+  CHECK(!c.ready());
+
+  // A steady player 30 ms late with +-10 ms of wobble: the suggestion is -30 ms.
+  c.reset();
+  for (int k = 4; k < 4 + 40; k++) c.press(k * 0.5 + 0.030 + ((k % 3) - 1) * 0.010);
+  CHECK(c.ready() && c.count() == game::Calibration::kWindow);
+  CHECK(std::fabs(c.suggestedOffset() + 0.030) < 0.002);
+  CHECK(c.stdDev() > 0.005 && c.stdDev() < 0.012);
+
+  // Only the last kWindow presses count: the player settles from 30 ms late to 0.
+  for (int k = 100; k < 100 + 32; k++) c.press(k * 0.5);
+  CHECK_NEAR(c.mean(), 0.0, 1e-12);
+}
+
 int main(int argc, char** argv) {
   std::string dir = ".";
   int fuzzIterations = 3000;
@@ -1083,6 +1155,8 @@ int main(int argc, char** argv) {
   TestAutoplayCorpus(dir);
   TestTestSong(dir);
   TestSongLibrary(dir);
+  TestConfig(dir);
+  TestCalibration();
   RunFuzz(dir, fuzzIterations);
 
   std::printf("\n%d checks, %d failures%s\n", g_checks, g_failures,
