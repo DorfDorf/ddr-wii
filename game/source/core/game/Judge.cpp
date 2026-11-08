@@ -60,6 +60,7 @@ void Judge::load(const std::vector<ddr::Note>& notes, int lanes, const Options& 
     s.time = n.time;
     s.end_time = n.IsHold() ? n.endTime : n.time;
     s.row = n.row;
+    s.end_row = n.IsHold() ? n.endRow : n.row;
     s.lane = n.lane;
     s.hold = n.IsHold();
     if (rows_.empty() || notes_.back().row != n.row) {

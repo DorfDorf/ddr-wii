@@ -10,13 +10,19 @@
 # Usage (devkitPro MSys2 shell):
 #   tools/stage-sd.sh            # stage into sd/ in the repo (gitignored boot.dol files)
 #   tools/stage-sd.sh /e         # stage straight onto an SD card mounted as E:
-#   tools/stage-sd.sh "$(cygpath -u "$USERPROFILE")/Dolphin-x64/User/Load/WiiSDSync"
-#                                # Dolphin's SD sync folder (doc 03 §4.3)
+#   tools/stage-sd.sh dolphin    # Dolphin's SD sync folder, <profile>/Dolphin-x64/User/Load/WiiSDSync
+#                                # (doc 03 §4.3)
 # Only the files above are written; nothing else on the card is touched.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 dest="${1:-$root/sd}"
+if [ "$dest" = dolphin ]; then
+    # USERPROFILE is empty in some MSys2 shells (bash -lc); ask Windows then, as run-dolphin.sh does.
+    profile="${USERPROFILE:-}"
+    [ -n "$profile" ] || profile="$(powershell.exe -NoProfile -Command '[Environment]::GetFolderPath("UserProfile")' | tr -d '\r')"
+    dest="$(cygpath -u "$profile")/Dolphin-x64/User/Load/WiiSDSync"
+fi
 
 make -C "$root/tools/padtest"
 make -C "$root/game"
