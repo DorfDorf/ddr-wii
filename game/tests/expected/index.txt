@@ -1,0 +1,25 @@
+# corpus files (relative to game/tests/corpus/), written by tools/simfile-oracle.py --regen
+simfile-testdata/L9.ssc
+simfile-testdata/Springtime.ssc
+simfile-testdata/blank.sm
+simfile-testdata/blank.ssc
+simfile-testdata/nekonabe.sm
+synthetic/01_constant_bpm.sm
+synthetic/02_many_bpm_changes.sm
+synthetic/03_stops.sm
+synthetic/04_bpm_and_stop_same_beat.sm
+synthetic/05_delays.ssc
+synthetic/06_warps.ssc
+synthetic/07_split_timing.ssc
+synthetic/08_ssc_old_version.ssc
+synthetic/09_odd_whitespace.sm
+synthetic/10_missing_semicolons.sm
+synthetic/11_quantisations.sm
+synthetic/12_holds_rolls_mines.sm
+synthetic/13_lifts_fakes.ssc
+synthetic/14_extreme_bpm.sm
+synthetic/15_double_solo.sm
+synthetic/16_escapes_decimals.ssc
+synthetic/17_beat0_events.ssc
+synthetic/18_split_warps_scrolls.ssc
+synthetic/19_sm_delays_edit.sm

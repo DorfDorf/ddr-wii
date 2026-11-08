@@ -21,6 +21,16 @@ A new lightweight Wii-native engine built with devkitPPC + libogc + GRRLIB. Audi
 | [07 — Existing codebase review](docs/07-existing-codebase-review.md) | StepMania-Wii and Dance Clone Wii review |
 | [Sources](docs/sources.md) | Links, dates checked, maintenance status |
 
+## Chart parser and timing tests (PC, no Wii needed)
+
+`game/source/core/` holds the `.sm`/`.ssc` parser and the beat↔seconds timing engine (ported from ITGmania v1.3.0, GPLv3). They're portable C++17 with no libogc. One command builds and tests them on the PC against the Python `simfile` library:
+
+```sh
+game/tests/run-tests.sh
+```
+
+On Windows this needs `g++` in devkitPro's MSYS2 (one-time: `pacman -S gcc` in the devkitPro MSYS2 shell). The script works from Git Bash. See [game/tests/README.md](game/tests/README.md) for the corpus, the oracle (`tools/simfile-oracle.py`) and the known `simfile`/StepMania differences.
+
 ## Reference material
 
 The reviewed projects (StepMania-Wii, Dance Clone) aren't in this repository. They live in a local `reference/` folder because of their licences and the bundled third-party music and data. Their upstream locations are listed in [docs/sources.md](docs/sources.md).
