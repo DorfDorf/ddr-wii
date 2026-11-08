@@ -24,6 +24,7 @@ constexpr Track kTracks[] = {
     {"sd:/ddrwii/test/click120-48k.wav", "48 kHz"},
     {"sd:/ddrwii/test/click120-44k.wav", "44.1 kHz"},
     {"sd:/ddrwii/test/click120-44k.ogg", "OGG 44.1 kHz"},
+    {"sd:/ddrwii/test/click120-44k.mp3", "MP3 44.1 kHz"},
 };
 // SongClock comes from ASND's mixing ticks; "buffers-clock" is the file content actually
 // handed over (retired buffers) minus SongClock at that moment. Its average is a fixed
@@ -186,8 +187,15 @@ void AudioClockTest::draw(s64 song_us) {
         font_.print(40, 382, white, 1, "read/decode max %5.1f ms per %lu frames   CPU %4.1f%%",
                     st.read_max_us / 1e3, (unsigned long)wii::AudioStream::kChunkFrames,
                     audio_us > 0 ? st.decode_us * 100.0 / audio_us : 0.0);
+        // MP3s start late by decoder output that ITGmania plays too (WiiAudio.cpp, Mp3Source).
+        // The click in this file is late against the flash by this much, on purpose.
+        if (stream_.startDelayFrames())
+            font_.print(40, 446, warn, 1, "MP3 music starts %.1f ms late (%lu frames%s), as in ITGmania",
+                        stream_.startDelayFrames() * 1000.0 / stream_.rate(),
+                        (unsigned long)stream_.startDelayFrames(),
+                        stream_.startDelayKnown() ? "" : ", no LAME tag");
     }
-    font_.print(40, 410, grey, 1, "A next track (48k WAV, 44.1k WAV, OGG)   START restart");
+    font_.print(40, 410, grey, 1, "A next track (48k WAV, 44.1k WAV, OGG, MP3)  START restart");
     font_.print(40, 428, grey, 1, "B next test   START+Z 2 s exit");
     GRRLIB_SetAntiAliasing(true);
 }

@@ -136,6 +136,7 @@ A **calibration screen** (M5) plays a click track with flashing arrows. The play
 | Memory | Read the whole **compressed** file into MEM2 at song start (3–8 MB), decode on the fly into a ~0.5 s PCM ring | Full PCM decode (~35 MB for 3 min) would use too much of the 88 MB |
 | Menu preview | Same streamer, starting at `#SAMPLESTART` for `#SAMPLELENGTH` | — |
 | SFX | WAVs preloaded and played on free voices (as in Dance Clone `Sound.cpp:240-250`) | — |
+| MP3 timing | Decode like ITGmania v1.3.0 [src]: no gapless trim (LAME delay and libmad's 529 samples stay in), skip a first `Xing` frame, but play a first `Info` frame as audio | Simfile offsets were synced against ITGmania's output; trimming would make MP3 songs ~25–50 ms early |
 | Avoid | `MP3Player_*` for gameplay (no position query **[src: mp3player.h]**) | It's why Dance Clone needed a 109 ms fudge |
 
 Bugs in StepMania-Wii's driver that we shouldn't copy (its author reports it crashed after a few seconds):

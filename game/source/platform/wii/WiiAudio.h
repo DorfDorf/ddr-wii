@@ -2,6 +2,7 @@
 // WiiAudio - play a song file from the SD card through ASND voice 0 (doc 06 §4, M4b).
 //   .wav  16-bit PCM, streamed from the SD card
 //   .ogg  Vorbis, read into memory first, decoded with Tremor
+//   .mp3  read into memory first, decoded with libmad the way ITGmania does (no gapless trim)
 //
 // A fill thread reads or decodes the file into a ring of kChunks buffers. The ASND voice
 // callback (interrupt level, once per 21.3 ms mixing tick while ASND's second slot is empty)
@@ -44,7 +45,7 @@ public:
     // Ensures ASND is running (ASND_Init once per boot).
     static void initAsnd();
 
-    // Opens a .wav or .ogg, starts the fill thread and fills the ring. Doesn't play yet.
+    // Opens a .wav, .ogg or .mp3, starts the fill thread and fills the ring. Doesn't play yet.
     bool open(const char* path);
     void play();
     void close();
@@ -55,6 +56,10 @@ public:
     u32 rate() const { return rate_; }
     int channels() const { return channels_; }
     u32 totalFrames() const { return total_frames_; }
+    // Decoder output before the music starts (MP3: Info frame + LAME delay + 529 frames).
+    // Played, not trimmed, as in ITGmania. known = false: no LAME tag, delay only estimated.
+    u32 startDelayFrames() const { return start_delay_frames_; }
+    bool startDelayKnown() const { return start_delay_known_; }
 
     struct TickReport {
         u64 tick = 0;            // gettime() at the mixing tick
@@ -80,6 +85,8 @@ private:
     u32 frames_read_ = 0;
     u32 read_max_us_ = 0;
     u64 decode_us_ = 0;
+    u32 start_delay_frames_ = 0;
+    bool start_delay_known_ = true;
     u32 lwp_ = 0;                // lwp_t
     volatile bool stop_ = false;
     bool playing_ = false;

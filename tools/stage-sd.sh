@@ -50,9 +50,13 @@ done
 ffmpeg="$(command -v ffmpeg || true)"
 [ -n "$ffmpeg" ] || ffmpeg="$(ls /c/Users/*/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg*/*/bin/ffmpeg.exe 2>/dev/null | head -n 1)"
 wav="$dest/ddrwii/test/click120-44k.wav"
-out="$dest/ddrwii/test/click120-44k.ogg"
-if [ -f "$out" ]; then :
-elif [ -z "$ffmpeg" ] || [ ! -f "$wav" ]; then echo "  (no ffmpeg or WAV: skipped $out)"
-else "$ffmpeg" -loglevel error -y -i "$(winpath "$wav")" -c:a libvorbis -q:a 6 "$(winpath "$out")" && echo "  $out"
-fi
+encode() {   # <extension> <ffmpeg codec options...>
+    local out="$dest/ddrwii/test/click120-44k.$1"
+    shift
+    if [ -f "$out" ]; then return; fi
+    if [ -z "$ffmpeg" ] || [ ! -f "$wav" ]; then echo "  (no ffmpeg or WAV: skipped $out)"; return; fi
+    "$ffmpeg" -loglevel error -y -i "$(winpath "$wav")" "$@" "$(winpath "$out")" && echo "  $out"
+}
+encode ogg -c:a libvorbis -q:a 6
+encode mp3 -c:a libmp3lame -b:a 192k   # CBR: LAME writes an "Info" tag (see WiiAudio Mp3Source)
 echo "Done. Copy the apps/ and ddrwii/ folders to the root of the SD card."

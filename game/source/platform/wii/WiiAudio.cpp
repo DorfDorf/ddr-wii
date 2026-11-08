@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <mad.h>
 #include <tremor/ivorbisfile.h>
 #include <unistd.h>
 
@@ -45,6 +46,8 @@ struct Source {
     int channels = 0;
     u32 total_frames = 0;
     bool little_endian = false;   // WAV data is LE; decoders write the CPU's order (BE)
+    u32 start_delay_frames = 0;   // silence/delay before the music in the decoded output
+    bool start_delay_known = true;
     virtual ~Source() {}
     // Writes up to `frames` frames to dst; returns how many (fewer only at the end).
     virtual u32 read(u8* dst, u32 frames) = 0;
@@ -148,6 +151,165 @@ struct OggSource : Source {
     }
 };
 
+// MP3: the whole file is read into memory, then decoded with libmad. Timing follows ITGmania
+// v1.3.0's RageSoundReader_MP3 [src], because simfile offsets were synced against it:
+//   - no gapless trimming: the LAME encoder delay and libmad's 529-sample synthesis delay
+//     stay in, and sample 0 is the first sample libmad synthesises;
+//   - a first frame tagged "Xing" (VBR) is skipped, but one tagged "Info" (CBR) is played
+//     as audio (usually 1152 samples of silence);
+//   - frames with a bad CRC produce no output.
+// The LAME delay is read only to show how late the music starts (start_delay_frames).
+struct Mp3Source : Source {
+    u8* data = nullptr;
+    size_t size = 0;
+    mad_stream stream;
+    mad_frame frame;
+    mad_synth synth;
+    bool mad_open = false;
+    bool first_frame = true;
+    u32 pcm_pos = 0, pcm_len = 0;   // unread samples of the last synthesised frame
+
+    // Byte offset of a Xing/Info tag in the frame at p, after the header and side info.
+    static size_t tagOffset(const u8* p) {
+        const bool mpeg1 = ((p[1] >> 3) & 3) == 3;
+        const bool mono = (p[3] >> 6) == 3;
+        const bool crc = !(p[1] & 1);
+        return 4 + (crc ? 2 : 0) + (mpeg1 ? (mono ? 17 : 32) : (mono ? 9 : 17));
+    }
+    // 'X' for Xing, 'I' for Info, 0 for neither. Reads the LAME encoder delay if present.
+    char tagType(const u8* p, const u8* end, int* enc_delay) {
+        const u8* t = p + tagOffset(p);
+        if (t + 8 > end) return 0;
+        char type = 0;
+        if (!memcmp(t, "Xing", 4)) type = 'X';
+        if (!memcmp(t, "Info", 4)) type = 'I';
+        if (!type) return 0;
+        const u32 flags = (u32)t[4] << 24 | t[5] << 16 | t[6] << 8 | t[7];
+        const size_t lame = 8 + (flags & 1 ? 4 : 0) + (flags & 2 ? 4 : 0) + (flags & 4 ? 100 : 0) +
+                            (flags & 8 ? 4 : 0);
+        // LAME extension: 9-byte encoder name ("LAME3.100", "Lavc..."), delay at +21 (12 bits).
+        if (t + lame + 24 <= end && t[lame] >= 'A' && t[lame] <= 'z')
+            *enc_delay = t[lame + 21] << 4 | t[lame + 22] >> 4;
+        return type;
+    }
+
+    ~Mp3Source() override {
+        if (mad_open) {
+            mad_synth_finish(&synth);
+            mad_frame_finish(&frame);
+            mad_stream_finish(&stream);
+        }
+        free(data);
+    }
+    const char* open(FILE* f) {
+        fseek(f, 0, SEEK_END);
+        const long len = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        // libmad needs MAD_BUFFER_GUARD zero bytes after the data to decode the last frame.
+        data = len > 0 ? (u8*)calloc(len + MAD_BUFFER_GUARD, 1) : nullptr;
+        const bool ok = data && fread(data, 1, len, f) == (size_t)len;
+        fclose(f);
+        if (!ok) return data ? "SD read failed" : "out of memory";
+        size = len;
+
+        // Scan the frame headers once: rate, channels, length and the Xing/Info tag.
+        mad_stream s;
+        mad_header h;
+        mad_stream_init(&s);
+        mad_header_init(&h);
+        mad_stream_buffer(&s, data, size + MAD_BUFFER_GUARD);
+        u64 samples = 0;
+        bool first = true;
+        int enc_delay = -1;
+        char tag = 0;
+        for (;;) {
+            if (mad_header_decode(&h, &s) != 0) {
+                if (s.error == MAD_ERROR_BUFLEN) break;
+                if (s.error == MAD_ERROR_LOSTSYNC) skipId3(&s);
+                if (MAD_RECOVERABLE(s.error)) continue;
+                break;
+            }
+            const u32 n = 32 * MAD_NSBSAMPLES(&h);
+            if (first) {
+                first = false;
+                rate = h.samplerate;
+                channels = h.mode == MAD_MODE_SINGLE_CHANNEL ? 1 : 2;
+                tag = tagType(s.this_frame, data + size, &enc_delay);
+                if (tag == 'X') continue;   // skipped, like ITGmania
+            }
+            samples += n;
+        }
+        mad_header_finish(&h);
+        mad_stream_finish(&s);
+        if (!rate) return "no MP3 frames found";
+        total_frames = (u32)samples;
+        // How late the music starts: Info frame + LAME delay + libmad's 529-sample delay.
+        start_delay_frames = (tag == 'I' ? 1152 : 0) + (enc_delay >= 0 ? enc_delay : 0) + 529;
+        start_delay_known = enc_delay >= 0;
+
+        mad_stream_init(&stream);
+        mad_frame_init(&frame);
+        mad_synth_init(&synth);
+        mad_stream_buffer(&stream, data, size + MAD_BUFFER_GUARD);
+        mad_open = true;
+        return nullptr;
+    }
+    // An ID3v2 tag where libmad lost sync: skip it whole.
+    static void skipId3(mad_stream* s) {
+        const u8* p = s->this_frame;
+        if (s->bufend - p < 10 || memcmp(p, "ID3", 3)) return;
+        const u32 len = 10 + (p[6] << 21 | p[7] << 14 | p[8] << 7 | p[9]) + (p[5] & 0x10 ? 10 : 0);
+        if ((long)len <= s->bufend - p) mad_stream_skip(s, len);
+    }
+    // Decodes the next frame into synth. False at the end of the file.
+    bool nextFrame() {
+        for (;;) {
+            if (mad_frame_decode(&frame, &stream) != 0) {
+                if (stream.error == MAD_ERROR_BUFLEN) return false;
+                if (stream.error == MAD_ERROR_LOSTSYNC) skipId3(&stream);
+                if (stream.error == MAD_ERROR_BADDATAPTR) {   // ITGmania plays these anyway
+                    mad_synth_frame(&synth, &frame);
+                    break;
+                }
+                if (MAD_RECOVERABLE(stream.error)) continue;   // bad CRC etc.: no output
+                return false;
+            }
+            if (first_frame) {
+                first_frame = false;
+                int unused;
+                if (tagType(stream.this_frame, data + size, &unused) == 'X') continue;
+            }
+            mad_synth_frame(&synth, &frame);
+            break;
+        }
+        pcm_pos = 0;
+        pcm_len = synth.pcm.length;
+        return true;
+    }
+    static s16 toS16(mad_fixed_t x) {
+        x += 1L << (MAD_F_FRACBITS - 16);   // round
+        if (x >= MAD_F_ONE) x = MAD_F_ONE - 1;
+        if (x < -MAD_F_ONE) x = -MAD_F_ONE;
+        return (s16)(x >> (MAD_F_FRACBITS + 1 - 16));
+    }
+    u32 read(u8* dst, u32 frames) override {
+        s16* out = (s16*)dst;   // big-endian, the CPU's order
+        u32 done = 0;
+        while (done < frames) {
+            if (pcm_pos >= pcm_len && !nextFrame()) break;
+            const mad_fixed_t* l = synth.pcm.samples[0];
+            const mad_fixed_t* r = synth.pcm.samples[synth.pcm.channels > 1 ? 1 : 0];
+            while (pcm_pos < pcm_len && done < frames) {
+                *out++ = toS16(l[pcm_pos]);
+                if (channels == 2) *out++ = toS16(r[pcm_pos]);
+                pcm_pos++;
+                done++;
+            }
+        }
+        return done;
+    }
+};
+
 bool endsWith(const char* s, const char* ext) {
     const size_t n = strlen(s), m = strlen(ext);
     return n >= m && strcasecmp(s + n - m, ext) == 0;
@@ -248,6 +410,10 @@ bool AudioStream::open(const char* path) {
         OggSource* o = new OggSource;   // open() closes f
         src = o;
         err = o->open(f);
+    } else if (endsWith(path, ".mp3")) {
+        Mp3Source* m = new Mp3Source;   // open() closes f
+        src = m;
+        err = m->open(f);
     } else {
         WavSource* w = new WavSource(f);   // owns f
         src = w;
@@ -262,6 +428,8 @@ bool AudioStream::open(const char* path) {
     rate_ = src->rate;
     channels_ = src->channels;
     total_frames_ = src->total_frames;
+    start_delay_frames_ = src->start_delay_frames;
+    start_delay_known_ = src->start_delay_known;
     frames_read_ = 0;
     read_max_us_ = 0;
     decode_us_ = 0;
