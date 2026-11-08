@@ -5,6 +5,7 @@
 #   <dest>/apps/ddrwii/{boot.dol,meta.xml}
 #   <dest>/ddrwii/                      (data folder the game will read songs from)
 #   <dest>/ddrwii/test/click120-*.wav   (M4b click tracks, tools/make-click-track.py; made once)
+#   <dest>/ddrwii/songs/ddr-wii tests/Click 120/   (M4c test song, tools/make-test-song.py)
 #
 # Usage (devkitPro MSys2 shell):
 #   tools/stage-sd.sh            # stage into sd/ in the repo (gitignored boot.dol files)
@@ -59,4 +60,14 @@ encode() {   # <extension> <ffmpeg codec options...>
 }
 encode ogg -c:a libvorbis -q:a 6
 encode mp3 -c:a libmp3lame -b:a 192k   # CBR: LAME writes an "Info" tag (see WiiAudio Mp3Source)
+
+# M4c test song: a generated 120 BPM chart on the OGG click track (tools/make-test-song.py).
+song="$dest/ddrwii/songs/ddr-wii tests/Click 120"
+if [ -n "$py" ] && [ -f "$dest/ddrwii/test/click120-44k.ogg" ]; then
+    mkdir -p "$song"
+    "$py" "$(winpath "$root/tools/make-test-song.py")" "$(winpath "$song")"
+    cp "$dest/ddrwii/test/click120-44k.ogg" "$song/"
+else
+    echo "  (no python or OGG: skipped $song)"
+fi
 echo "Done. Copy the apps/ and ddrwii/ folders to the root of the SD card."
