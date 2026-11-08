@@ -43,31 +43,39 @@ void Video::beginFrame() { frame_start_ = gettime(); }
 
 void Video::endFrame() {
     const u64 submit = gettime();
-    GRRLIB_Render();   // GX_DrawDone + copy to XFB + VIDEO_WaitVSync
+    GX_DrawDone();     // wait for the GPU alone, so its time can be told apart from the CPU's
+    const u64 drawn = gettime();
+    GRRLIB_Render();   // GX_DrawDone (now immediate) + copy to XFB + VIDEO_WaitVSync
     const u64 now = gettime();
 
     stats_.busy_us = (u32)diff_usec(frame_start_, submit);
+    stats_.gpu_us = (u32)diff_usec(submit, drawn);
     if (last_present_ != 0) {
         stats_.interval_us = (u32)diff_usec(last_present_, now);
         if (stats_.interval_us > refresh_us_ + refresh_us_ / 2) stats_.dropped_total++;
 
         interval_hist_[hist_pos_] = stats_.interval_us;
         busy_hist_[hist_pos_] = stats_.busy_us;
+        gpu_hist_[hist_pos_] = stats_.gpu_us;
         hist_pos_ = (hist_pos_ + 1) % kWindow;
         if (hist_len_ < kWindow) hist_len_++;
 
-        u64 isum = 0, bsum = 0;
-        u32 imax = 0, bmax = 0;
+        u64 isum = 0, bsum = 0, gsum = 0;
+        u32 imax = 0, bmax = 0, gmax = 0;
         for (int i = 0; i < hist_len_; i++) {
             isum += interval_hist_[i];
             bsum += busy_hist_[i];
+            gsum += gpu_hist_[i];
             if (interval_hist_[i] > imax) imax = interval_hist_[i];
             if (busy_hist_[i] > bmax) bmax = busy_hist_[i];
+            if (gpu_hist_[i] > gmax) gmax = gpu_hist_[i];
         }
         stats_.avg_interval_us = (u32)(isum / hist_len_);
         stats_.avg_busy_us = (u32)(bsum / hist_len_);
+        stats_.avg_gpu_us = (u32)(gsum / hist_len_);
         stats_.max_interval_us = imax;
         stats_.max_busy_us = bmax;
+        stats_.max_gpu_us = gmax;
     }
     last_present_ = now;
     stats_.frame_count++;

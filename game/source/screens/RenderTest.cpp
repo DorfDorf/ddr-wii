@@ -69,8 +69,7 @@ bool RenderTest::frame() {
 }
 
 void RenderTest::handleInput() {
-    PAD_ScanPads();
-    held_ = PAD_ButtonsHeld(0);
+    held_ = PAD_ButtonsHeld(0);   // main() scans the pads once per frame
     const u16 down = PAD_ButtonsDown(0);
     if (down & PAD_BUTTON_A) auto_ = !auto_;
     int manual = 0;
@@ -173,7 +172,7 @@ void RenderTest::drawOverlay() {
                 s.max_busy_us / 1000.0f);
     font_.print(16, 426, s.dropped_total ? warn : white, 1, "dropped %lu   stress sprites %d (%s)",
                 (unsigned long)s.dropped_total, kStepSprites[step_], auto_ ? "auto" : "manual");
-    font_.print(16, 448, grey, 1, "A: auto on/off   L/R: fewer/more sprites   START+Z 2s: exit");
+    font_.print(16, 448, grey, 1, "A auto   L/R fewer/more sprites   B 2P/4P test   START+Z 2s exit");
 
     // Stress table, top right.
     GRRLIB_Rectangle(456, 8, 176, 18 * (kSteps + 1) + 8, 0x000000B0, true);

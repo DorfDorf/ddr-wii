@@ -8,7 +8,9 @@
 
 **Goals:** a single-player four-lane `dance-single` game that reads `.sm`/`.ssc` from SD, plays OGG/MP3, scrolls arrows in sync, judges taps and holds, shows a combo and score, and saves high scores. It runs in Dolphin and on a real Wii with a GameCube dance mat.
 
-**Non-goals (for now):** background videos, BGCHANGES, mods and attacks, Lua or themes, courses, doubles, online play, editing. All of these can be added later without changing the core.
+**Local multiplayer:** **2 players is a requirement, 4 is a stretch goal** that depends on a performance and readability check (see §11). Each player uses their own mat on their own GameCube port and plays the same song with their own difficulty and scroll speed. The core is built per player from the start, even though the first playable milestones run with one player.
+
+**Non-goals (for now):** background videos, BGCHANGES, mods and attacks, Lua or themes, courses, doubles (one player on two mats, which the per-port design makes easy to add later), online play, editing. All of these can be added later without changing the core.
 
 ## 2. Threads and main loop
 
@@ -149,7 +151,7 @@ Use `ASND_TestPointer()` / `ASND_TestVoiceBufferReady()` (`asndlib.h:354`, `:363
 ## 5. Rendering
 
 - **GRRLIB** on GX: `GRRLIB_Init()`, `GRRLIB_LoadTexturePNG()`, `GRRLIB_DrawImg/DrawTile`, `GRRLIB_PrintfTTF`, `GRRLIB_Render()` (which swaps on vsync) **[exp: confirm names against the GRRLIB v4.6.1 headers]**.
-- 640×480 logical canvas. Four lanes of 64 px, centred. Receptors at y ≈ 80 (upward scroll, DDR style).
+- 640×480 logical canvas. Four lanes of 64 px, centred. Receptors at y ≈ 80 (upward scroll, DDR style). With 2–4 players the lane width and playfield positions come from a layout table (§11.3).
 - **Arrow texture atlas:** one 256×256 PNG holding 4 directions × quantisation colours (4th red, 8th blue, 16th yellow, …, like Dance Clone's `Media/Game/04thnote.png`…`192ndnote.png`, which shows the idea). Rotate one arrow sprite instead of storing four.
 - **Receptor flash** on press, an **explosion** sprite on hit tinted by judgement, judgement text plus a combo counter (bitmap font), a life bar, and a score.
 - **Holds:** body tiled between head and tail, a cap at the tail, dimmed after NG.
@@ -168,7 +170,7 @@ Use `ASND_TestPointer()` / `ASND_TestVoiceBufferReady()` (`asndlib.h:354`, `:363
 | Prototype support | taps, holds, jumps. Ignore mines, fakes and lifts at first (parse them, don't judge them). Rolls are treated as holds | — |
 | Output | `Chart{ difficulty, meter, TimingData, vector<Note{beat, time, lane, type, endBeat, endTime}> }` sorted by time | — |
 
-`.dwi` support could come later from SM 3.9's `NotesLoaderDWI.cpp` if wanted.
+`.dwi` support could come later from ITGmania `v1.3.0`'s `NotesLoaderDWI.cpp` (SM 3.9's version as the reference) if wanted.
 
 ## 7. Game state and screens
 
@@ -183,7 +185,7 @@ Options (scroll speed, global offset, calibration) reachable from Title.
 - **SongLibrary cache:** parsing headers for hundreds of songs from SD is slow, so cache `{path, mtime, title, artist, bpm range, difficulties}` in `sd:/ddrwii/cache.bin` **[exp: measure the scan time]**.
 - **Scoring (prototype):** "dance points" percentage, as in StepMania/ITG (Marvelous/Perfect = 100%, Great = 50%, Good/Boo/Miss = 0, holds OK = full credit) plus max combo and judgement counts. DDR-style money score can be added later (SM 3.9 `ScoreKeeperMAX2.cpp` as reference).
 - **High scores:** `scores.dat` is a small versioned binary or INI keyed by `songHash + difficulty`, storing the best percentage, combo and grade. It's written atomically (write a temp file, then rename).
-- **Settings:** `config.ini` holds `GlobalOffset`, `VisualOffset`, `DefaultSyncOffset` (`NULL` or `ITG`, for packs without `pack.ini`), `InputDebounceMs`, `ScrollSpeed`, `PadPort`, `LaneMap`.
+- **Settings:** `config.ini` holds `GlobalOffset`, `VisualOffset`, `DefaultSyncOffset` (`NULL` or `ITG`, for packs without `pack.ini`), `InputDebounceMs`, and per port (`[Port1]`…`[Port4]`) `LaneMap`, `InputOffset` and the last-used `ScrollSpeed`. See §11 for how ports become players.
 
 ## 8. Wii-specific lifecycle
 
@@ -234,3 +236,64 @@ The `core/` code has no dependency on libogc, so `game/tests/` can compile it wi
 | SD card speed | Load the whole audio file before starting play (no SD reads during gameplay). Cache metadata |
 | SI pad polling | Timestamp inputs at sampling time, not at frame time |
 | No reliable wall clock for sync | The audio sample count is the master clock |
+| 4 GameCube ports (original Wii models only) | Up to 4 local players, one mat per port. The Family Edition (RVL-101) and Wii Mini have no GameCube ports, so this game needs an original-model Wii, even for one player |
+
+## 11. Local multiplayer (2–4 players)
+
+### 11.1 What is shared and what is per player
+
+| Shared (one per song) | Per player |
+|---|---|
+| `SongClock`, the audio stream, `globalOffset` / `visualOffset` (one TV, one sound path) | Chart (their difficulty), its precomputed note times |
+| Song selection, pack offset, `TimingData` for song-level timing | `Judge` state, `Score`, combo, life bar, held-miss log |
+| Background, banner, SFX voices | Scroll speed, lane map, `InputOffset` (small per-mat latency difference) |
+| | Debounce state (per port, per panel) |
+
+`.ssc` charts can carry their own timing, so each player keeps a pointer to their chart's `TimingData` (which falls back to the song's). Two players on different difficulties of a split-timing song are then both correct.
+
+Memory cost is small: a chart is a few thousand notes, so four of them are tens of KB. The audio buffers and textures are shared.
+
+### 11.2 Input and joining
+
+- `PAD_ScanPads()` already reads all four ports, and `LaneEvent` already carries `port` (doc 04 §8). The gameplay loop routes each event to the player bound to that port. Nothing else in input changes.
+- **Joining:** on the title screen and song select, pressing Start on a port joins it as the next player, DDR style. Leaving goes through B/Z on that port before the song starts. The player number follows join order, not the port number, so one mat in port 3 is still P1.
+- **Menus:** any joined player can move the song wheel. Difficulty and scroll speed are chosen per player on the difficulty screen, with each player's cursor in their own column. The song starts when every joined player has confirmed.
+- **Pause:** Start on any joined port pauses for everyone.
+
+### 11.3 Playfield layout
+
+The logical canvas is 640 px wide. Four lanes at 64 px are 256 px, so:
+
+| Players | Lane width | Playfield width | Layout |
+|---|---|---|---|
+| 1 | 64 px | 256 px | Centred |
+| 2 | 64 px | 256 px | Centred at x = 160 and 480, DDR versus style. Fits with room for score and life bars |
+| 3–4 | ~36 px (arrows scaled ≈ 0.55) | ~144 px, plus gaps | Four columns of 160 px. Judgement and combo text sits inside each column |
+
+- Every draw goes through a `Playfield{ x, laneWidth, scale }` built from this table, so 1, 2 and 4 players use the same rendering code.
+- **[exp] 4-player readability:** 36 px arrows on a 480-line TV, 3 m from the screen, may be too small to read at high scroll speeds. Check it on a real TV before committing to 4P. If it fails, try a 16:9 mode: with the Wii set to widescreen, the TV stretches the 640 px framebuffer, so drawing for an 854 px-wide logical canvas gives each player room for lanes about 48 px wide on screen.
+
+### 11.4 Rules
+
+- The song keeps playing until it ends or **every** player has failed. A failed player's playfield greys out and stops judging. A per-player "no fail" option is planned with the rest of the options.
+- Results show every player side by side. High scores are still keyed by `songHash + difficulty`. Player names or profiles come later (a three-letter entry on the results screen is enough at first).
+- Assist clap and other SFX play once per row, not once per player.
+
+### 11.5 Performance budget **[exp]**
+
+| Cost | 1 player | 4 players | Notes |
+|---|---|---|---|
+| Visible notes and hold pieces | ~30–80 sprites | ~120–320 sprites | Dense 16ths at high speed are the worst case |
+| Receptors, explosions, judgement, combo, life, score | ~15 draws | ~60 draws | Text uses the bitmap font (`render/Font`), not `GRRLIB_PrintfTTF` per frame |
+| Judging | trivial | trivial | O(events) per frame |
+| Audio decode | one stream | one stream | Unchanged: the music is shared |
+
+The M2 render test already holds full frame rate with **1,600 sprites** in Dolphin, so the sprite count alone is well inside the budget. The open questions are:
+
+- **Dolphin isn't a performance model.** It draws on the PC's GPU and doesn't model how long the Wii's GPU takes, so GPU cost is invisible there. Its CPU timing follows emulated instructions but not cache misses, so CPU time measured in Dolphin is only a lower bound. The 2P/4P stress test must also run on the real Wii with the frame-time overlay (via `make -C game run` and wiiload, doc 03).
+- **Fill rate is probably not the limit.** A 4-player worst case is roughly 1.5 Mpx per frame: a full-screen background (0.3 Mpx), four lane backgrounds (~0.28 Mpx), ~320 notes at 36² px (~0.4 Mpx), plus hold bodies and explosions. At 60 Hz that's ~90 Mpx/s, about a tenth of Hollywood's theoretical ~970 Mpx/s (4 pixel pipes × 243 MHz). Real texturing and blending lower the ceiling, but leave a wide margin.
+- **CPU time per draw is the more likely limit.** Each `GRRLIB_DrawImg` sets up a matrix, loads its texture object and submits a quad, all on the CPU. Hundreds of those per frame, plus texture switches, add up. Mitigations if it shows: one atlas texture for all arrows (fewer texture loads), batching notes into a single GX draw per playfield, and drawing text from a glyph atlas.
+- **Measure what's measurable anywhere:** the render test reports per frame the CPU time from frame start to the vsync wait (`gettime()`), the number of draws, texture switches and the total drawn pixel area. The draw and area counts are the same in Dolphin and on hardware. They show where the budget goes before the hardware run decides.
+- **Four mats polled at once:** check that SI polling with four devices connected doesn't change the PAD sampling interval measured in M3.
+
+The test plan is in doc 05 (M2b, then the M3 and M6 hardware checks).

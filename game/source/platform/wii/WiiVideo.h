@@ -10,11 +10,15 @@ struct FrameStats {
     // Last completed frame, microseconds.
     u32 interval_us = 0;     // Render-return to Render-return (includes vsync wait)
     u32 busy_us = 0;         // frame start to Render call (CPU work, before GX flush)
+    u32 gpu_us = 0;          // GX_DrawDone wait after the CPU finished: GPU still drawing.
+                             // Meaningful on hardware only (Dolphin doesn't model GPU time).
     // Rolling window over the last kWindow frames.
     u32 avg_interval_us = 0;
     u32 max_interval_us = 0;
     u32 avg_busy_us = 0;
     u32 max_busy_us = 0;
+    u32 avg_gpu_us = 0;
+    u32 max_gpu_us = 0;
     u32 dropped_total = 0;   // frames whose interval exceeded 1.5x the refresh period
     u32 frame_count = 0;
 };
@@ -46,6 +50,7 @@ private:
     FrameStats stats_;
     u32 interval_hist_[kWindow] = {};
     u32 busy_hist_[kWindow] = {};
+    u32 gpu_hist_[kWindow] = {};
     int hist_pos_ = 0;
     int hist_len_ = 0;
     u64 frame_start_ = 0;

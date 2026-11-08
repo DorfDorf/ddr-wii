@@ -70,6 +70,19 @@ GRRLIB_texImg* rasterise(Pick pick) {
     return tex;
 }
 
+// Fill a texture pixel by pixel. `pick(x, y)` returns RGBA for the pixel centre.
+template <typename Pick>
+GRRLIB_texImg* generate(Pick pick) {
+    const int n = ArrowArt::kSize;
+    GRRLIB_texImg* tex = GRRLIB_CreateEmptyTexture(n, n);
+    if (!tex) return nullptr;
+    for (int py = 0; py < n; py++)
+        for (int px = 0; px < n; px++) GRRLIB_SetPixelTotexImg(px, py, tex, pick(px + 0.5f, py + 0.5f));
+    GRRLIB_FlushTex(tex);
+    GRRLIB_SetMidHandle(tex, true);
+    return tex;
+}
+
 }  // namespace
 
 bool ArrowArt::create() {
@@ -82,13 +95,27 @@ bool ArrowArt::create() {
         if (d < 4.0f) return {220, 220, 220, 255};          // outline
         return {0, 0, 0, 110};                               // translucent body
     });
-    return note && receptor;
+    hold = generate([](float x, float) -> u32 {
+        const float d = fabsf(x - kSize / 2.0f);             // distance from the bar's centre line
+        if (d > 22.0f) return 0;
+        if (d > 18.0f) return 0xF0F0F0E0;                     // bright edges
+        return 0xC0C0C0A0;                                    // translucent body
+    });
+    glow = generate([](float x, float y) -> u32 {
+        const float dx = x - kSize / 2.0f, dy = y - kSize / 2.0f;
+        const float d = sqrtf(dx * dx + dy * dy) / (kSize / 2.0f);
+        if (d >= 1.0f) return 0;
+        const float a = (1.0f - d) * (1.0f - d);
+        return 0xFFFFFF00 | (u32)(a * 255.0f + 0.5f);
+    });
+    return note && receptor && hold && glow;
 }
 
 void ArrowArt::destroy() {
-    if (note) GRRLIB_FreeTexture(note);
-    if (receptor) GRRLIB_FreeTexture(receptor);
-    note = receptor = nullptr;
+    GRRLIB_texImg* all[] = {note, receptor, hold, glow};
+    for (GRRLIB_texImg* t : all)
+        if (t) GRRLIB_FreeTexture(t);
+    note = receptor = hold = glow = nullptr;
 }
 
 }  // namespace render

@@ -4,6 +4,8 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+#include "render/Draw.h"
+
 // libogc's console font: 256 glyphs x 16 rows, one byte per row, MSB = leftmost pixel.
 extern "C" u8 console_font_8x16[];
 
@@ -44,7 +46,7 @@ void Font::print(float x, float y, u32 colour, float scale, const char* fmt, ...
     const float step = kGlyphW * scale;
     for (int i = 0; i < len; i++) {
         const u8 ch = (u8)buf[i];
-        if (ch != ' ') GRRLIB_DrawTile(x + i * step, y, tex_, 0, scale, scale, colour, ch);
+        if (ch != ' ') tile(x + i * step, y, tex_, 0, scale, scale, colour, ch);
     }
 }
 

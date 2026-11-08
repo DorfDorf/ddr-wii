@@ -242,4 +242,6 @@ struct LaneEvent { u64 tick; u8 port; u8 lane; bool pressed; };
 // Consumer: gameplay loop drains events, converts tick -> song time, judges per lane.
 // Mapping:  per-port table {LEFT,DOWN,UP,RIGHT} -> lanes 0..3 (configurable for Active Life mats);
 //           START = confirm/pause, B or Z = back. Menus also accept arrows.
+// Players:  each port that pressed START to join is bound to a player; events are routed by port
+//           (local multiplayer, 2 players required, 4 stretch: doc 06 §11). Debounce state is per port.
 ```
