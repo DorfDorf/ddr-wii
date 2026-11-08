@@ -12,9 +12,10 @@
 
 1. **Both supplied projects are abandoned (2012 and 2013), and neither is a good foundation.** Each has valuable parts. The details are in [07-existing-codebase-review.md](07-existing-codebase-review.md).
 2. **No modern StepMania-family engine can realistically be ported to the Wii.** All of them depend on desktop OpenGL (or Vulkan), FFmpeg, Lua and hundreds of MB of RAM. The Wii has 88 MB in total and a fixed-function GPU.
-3. **The Wii homebrew toolchain is alive and well.** devkitPro's libogc **v3.2.1 was tagged on 2026‑10‑15**, and the installer v3.0.3 is current. GRRLIB (an MIT-licensed 2D library) and SDL/SDL2 for Wii are packaged.
+3. **The Wii homebrew toolchain is alive and well.** devkitPro's libogc **v3.2.1 was tagged on 2026‑10‑15**, and the installer v3.0.3 is current. SDL/SDL2 for Wii are packaged, and GRRLIB (an MIT-licensed 2D library) builds from source against packaged libraries.
 4. **GameCube dance mats appear to libogc as standard GameCube controllers**, with the arrows on D-pad bits. libogc doesn't filter simultaneous opposite directions, so jumps work. **[src]** (libogc `pad.c`, Dolphin `SI_Device.h`/`SI_DeviceDanceMat.cpp`, Dance Clone `WiiInput.cpp`). This needs a final **[exp]** check with your specific pad.
-5. **A small new engine is the practical route.** It would port StepMania's MIT-licensed timing and chart algorithms and use Dance Clone as a behavioural reference.
+5. **A small new engine is the practical route.** It would port ITGmania's timing, chart, input and judgement code (current release, v1.3.0) and use Dance Clone as a behavioural reference.
+6. **StepMania itself is in maintenance only** (no release since 2018). **ITGmania** is the actively developed fork, GPLv3 since September 2024. **This project is GPL-3.0-or-later too** (decided 2026-11-08), so we port ITGmania's current code directly. See doc 02.
 
 ---
 
@@ -22,13 +23,13 @@
 
 | Engine | Repo | Language / build | Graphics | Audio/video deps | Charts | Licence | Activity (as of 2026‑11‑08) | Wii-feasible? |
 |---|---|---|---|---|---|---|---|---|
-| **StepMania 5.x** | [stepmania/stepmania](https://github.com/stepmania/stepmania) | C++, CMake (+ autotools remnants), Lua themes | OpenGL + GLU + GLEW **[doc]** | libogg/libvorbis, libMAD, **FFmpeg**, ALSA/Pulse/JACK **[doc]** | .sm, .ssc, .dwi, others | MIT (MAD/FFmpeg GPL when built in) | **Active.** Commits on `5_1-new` up to 2026‑11‑07. Latest stable 5.0.12, 5.1 still beta | **No.** GL 2+/GLEW, FFmpeg, memory |
-| **ITGmania** | [itgmania/itgmania](https://github.com/itgmania/itgmania) | C++, CMake ≥ 3.20 | OpenGL | FFmpeg built in, WASAPI/ALSA/Pulse | inherits SM 5.1 | **GPL‑3.0** | Active. v1.3.0 2026‑07‑01 | No |
+| **StepMania 5.x** | [stepmania/stepmania](https://github.com/stepmania/stepmania) | C++, CMake (+ autotools remnants), Lua themes | OpenGL + GLU + GLEW **[doc]** | libogg/libvorbis, libMAD, **FFmpeg**, ALSA/Pulse/JACK **[doc]** | .sm, .ssc, .dwi, others | MIT (MAD/FFmpeg GPL when built in) | **Maintenance only.** No release since 5.1.0‑b2 (2018); latest stable 5.0.12 (2016). Occasional build/CI commits on `5_1-new` (latest 2026‑11‑07), plus an August 2026 backport of ITGmania's MIT-era engine fixes | **No.** GL 2+/GLEW, FFmpeg, memory |
+| **ITGmania** | [itgmania/itgmania](https://github.com/itgmania/itgmania) | C++, CMake ≥ 3.20 | OpenGL, Direct3D, GLES2 (shaders) | FFmpeg, Lua 5.1, libmad (bundled); WASAPI/ALSA/Pulse | inherits SM 5.1 (.sm, .ssc, .dwi; KSF/BMS loaders removed in 2026) | **GPL‑3.0 since 2024‑09‑10.** MIT-style up to tag v0.9.0 (2024‑06‑18) | **The actively developed fork.** v1.3.0 2026‑07‑01 | **No** (same GL/FFmpeg/Lua barriers). The source of the timing, chart and input code we port: see [doc 02](02-architecture-options.md#itgmania-what-to-borrow) |
 | **Etterna** | [etternagame/etterna](https://github.com/etternagame/etterna) | C++, CMake ≥ 3.14 | OpenGL, experimental **Vulkan** | MAD, FFmpeg, OpenSSL, SQLite, Crashpad | .sm, plus others | MIT | Active. v0.75.1 2026‑09‑07 | No |
 | **Project OutFox** | [TeamRizu/OutFox](https://github.com/TeamRizu/OutFox) (bug tracker only) | fork of SM 5.1 | GL (GLAD) | rtAudio/PortAudio, FFmpeg | many (.sm, .ssc, .dwi, .ksf, .bms, .osu, .tja, …) | **Engine source not verified as open.** The GitHub repo holds no engine code | Last public build OF5.0.0‑043 (2025‑09‑07) | No (and no source) |
-| **StepMania 3.9** (2005) | inside your `stepmaniawii.zip` (`branches/original`) | C++03, autotools | OpenGL 1.x / D3D | MAD, Vorbis, SDL | .sm, .dwi, .ksf, .bms | MIT | Dead | Attempted by StepMania-Wii (2012) and never finished |
+| **StepMania 3.9** (2005) | [stepmania/stepmania](https://github.com/stepmania/stepmania) tag `v390release`. Your `stepmaniawii.zip` has a copy with 2009–10 port edits (`branches/original`) | C++03, autotools | OpenGL 1.x / D3D | MAD, Vorbis, SDL | .sm, .dwi, .ksf, .bms | MIT | Dead | Attempted by StepMania-Wii (2009–12) and never finished |
 | **Dance Clone** | [lefrac01/DanceClone](https://github.com/lefrac01/DanceClone) | C++98, Make | SDL 1.2 | libogc MP3Player/ASND | .sm subset | LGPL‑2.1 file / GPLv2+ headers | Dead (2013‑01‑16) | **Yes**, it is a native Wii game |
-| **StepMania-Wii** | Google Code `stepmania-wii` (gone, only your copy) | C++03 | GX (partial) | ASND, libmad, tremor | via SM 3.9 | MIT | Dead (2012‑04‑12) | Unfinished |
+| **StepMania-Wii** | Google Code `stepmania-wii`, still on the [Google Code Archive](https://storage.googleapis.com/google-code-archive/v2/code.google.com/stepmania-wii/project.json) (your zip is its source export) | C++03 | GX (partial) | ASND, libmad, tremor | via SM 3.9 | **GPL v2** (inherited SM 3.9 files are MIT) | Dead (2012‑04‑12) | Unfinished. A no-sound alpha was released in 2012 |
 
 ### Can a StepMania-based engine be ported? (Option A)
 
@@ -37,7 +38,7 @@ From the dependency lists above, plus the Wii's hardware:
 - **Graphics:** StepMania 5 and its forks render through OpenGL with GLEW (GL 2+ era extensions and shaders). The Wii's GPU ("Flipper/Hollywood" GX) is **fixed-function with a TEV combiner, not shader-based**. devkitPro packages an `opengx` GL shim **[doc: pacman-packages/wii/opengx]**, but it emulates only a fixed-function GL subset. Getting StepMania 5's renderer and themes onto it would be a research project in its own right.
 - **Video and audio:** FFmpeg is effectively required, for background videos and some audio. It isn't packaged for the Wii.
 - **Memory:** 24 MB MEM1 + 64 MB MEM2 **[doc: WiiBrew]**. Modern StepMania themes, the song cache, textures and Lua comfortably exceed this.
-- **Evidence:** the one real attempt (StepMania-Wii, which targeted the much smaller SM 3.9) stopped before showing a working boot.
+- **Evidence:** the one real attempt (StepMania-Wii, which targeted the much smaller SM 3.9) booted and drew gameplay, but its author never got the audio stable and the port was abandoned.
 
 **Conclusion: porting StepMania 5 / ITGmania / Etterna / OutFox is not realistic.** Their **file formats and timing algorithms** are what's worth reusing.
 
@@ -52,7 +53,7 @@ From the dependency lists above, plus the Wii's hardware:
 - `.sm` spec: [StepMania wiki /sm](https://github.com/stepmania/stepmania/wiki/sm). Header tags `#OFFSET` (seconds), `#BPMS` (`beat=bpm,…`), `#STOPS` (`beat=seconds,…`). `#NOTES:` has 5 colon-separated fields (type, author, difficulty, meter, radar), then measures separated by `,` and ending with `;`. Rows per measure set the quantisation (4…192). Note characters are `0 1 2 3 4 M`, and later `L F K`. **[doc]**
 - `.ssc` spec: [StepMania wiki /ssc](https://github.com/stepmania/stepmania/wiki/ssc) (marked "in progress"). Adds `#VERSION`, `#DELAYS`, `#WARPS`, `#TIMESIGNATURES`, `#TICKCOUNTS`, `#COMBOS`, `#SPEEDS`, `#SCROLLS`, `#FAKES`, `#LABELS`. A per-chart `#NOTEDATA:;` block carries `#STEPSTYPE`, `#DIFFICULTY`, `#METER`, `#NOTES` and optional **per-chart timing (split timing)**. **[doc]**
 - **Test oracle:** [garcia/simfile](https://github.com/garcia/simfile) (Python, MIT) parses SM/SSC and converts beat ↔ time, including BPM changes, stops, delays, warps and split timing. It's ideal for generating expected values to unit-test our C++ parser on the PC. **[doc]**
-- No standalone C/C++ `.sm`/`.ssc` parser library turned up (the GitHub `simfile` topic only lists Python/TS/Haxe projects and the ArrowVortex editor). So: **port StepMania 3.9's `MsdFile` + `NotesLoaderSM` + `TimingData` (MIT) and extend them for SSC.**
+- No standalone C/C++ `.sm`/`.ssc` parser library turned up (the GitHub `simfile` topic only lists Python/TS/Haxe projects and the ArrowVortex editor). So: **port `MsdFile`, `TimingData`/`TimingSegments`, `NotesLoaderSM` and `NotesLoaderSSC` from ITGmania tag `v1.3.0` (GPLv3, already SSC-complete), with StepMania 3.9's much smaller versions as a readable reference.** Doc 02 has the licence details.
 
 ---
 

@@ -35,7 +35,7 @@
 
 | Clock | Source | Use |
 |---|---|---|
-| CPU timer | libogc `gettime()` (time base ticks), `diff_usec()`, `ticks_to_microsecs()` **[src: used by StepMania-Wii `ArchHooks_Wii.cpp:68-72`]** | Timestamps for inputs and the audio callbacks. Smoothing |
+| CPU timer | libogc `gettime()` (64-bit time base ticks) and `ticks_to_microsecs()` on 64-bit tick differences. `diff_usec()` returns a `u32` and wraps after ~71.6 min, so use it only for short intervals **[src: lwp_watchdog.h; StepMania-Wii `ArchHooks_Wii.cpp:68-73` has this wrap]** | Timestamps for inputs and the audio callbacks. Smoothing |
 | Audio position | Frames handed to the DSP and completed, counted in our ASND voice callback. Cross-checked with `ASND_GetTimerVoice(voice)` (ms since the voice started) and `ASND_GetSampleCounter()` **[src: asndlib.h]** | **The master song clock** |
 
 **SongClock** keeps a linear map `audioSeconds ≈ a·cpuSeconds + b`. Each time the voice callback fires it records `(gettime(), framesConsumed)` and updates the map with a gentle low-pass, so time never jumps or runs backwards. This is the same idea as StepMania's `RageSoundPosMap`. `SongClock::now()` uses `gettime()` and the map, which gives sub-millisecond resolution between callbacks. **[exp, M4]:** measure jitter and drift against `ASND_GetTimerVoice` over a 3-minute song.
@@ -47,17 +47,27 @@ Why not Dance Clone's approach? It uses `SDL_GetTicks()` from a start point plus
 Using StepMania's convention (verified in SM 3.9 `TimingData.cpp:98-200` and `NotesLoaderSM.cpp:93-94`):
 
 ```
-noteTime(beat) = TimingData.secondsAtBeat(beat) − #OFFSET − globalOffset
+noteTime(beat) = TimingData.secondsAtBeat(beat) − (#OFFSET + packOffset) − globalOffset
 chartNow       = SongClock::now()          // seconds of music played (0 = first audio sample)
 ```
 
 - `#OFFSET` is per song (from the file). `globalOffset` is per machine (a calibration covering TV, audio and pad latency, stored in `config.ini`).
+- `packOffset` is per pack, following ITGmania's `pack.ini` convention:
+  - `SyncOffset=ITG` → −0.009 s (the pack carries ITG's 9 ms bias).
+  - `SyncOffset=NULL` → 0.
+  - No `pack.ini` → the `DefaultSyncOffset` setting.
+
+  ITGmania adds it to the song offset (`m_fBeat0OffsetInSeconds + m_fBeat0GroupOffsetInSeconds`). **[exp: confirm the sign with an ITG-synced pack]**
 - **Precompute** `noteTime` (as a `double`) for every note at load. Judging is then a simple comparison. SM 3.9 used `float`, but we use `double` for seconds to avoid precision loss on long songs.
-- For rendering, `currentBeat = TimingData.beatAtSeconds(chartNow + OFFSET + globalOffset)`, and a note's y position = `(note.beat − currentBeat) · pixelsPerBeat · speedMod`. Scrolling by **beat** is what makes arrows stop during `#STOPS`, matching StepMania's behaviour.
+- For rendering, `currentBeat = TimingData.beatAtSeconds(chartNow + OFFSET + packOffset + globalOffset)`, and a note's y position = `(note.beat − currentBeat) · pixelsPerBeat · speedMod`. Scrolling by **beat** is what makes arrows stop during `#STOPS`, matching StepMania's behaviour.
 
 ### 3.3 TimingData
 
-Port SM 3.9's `TimingData` (`GetElapsedTimeFromBeat` and `GetBeatAndBPSFromElapsedTime`, MIT) and restructure it as a **precomputed segment table**:
+Port the `TimingData` algorithms from ITGmania tag `v1.3.0` (GPLv3, like this project; see [doc 02](02-architecture-options.md#itgmania-what-to-borrow)). That version includes the 2026 lookup-table and time-signature fixes:
+- `GetElapsedTimeInternal` and `GetBeatInternal`, which already handle BPMs, stops, delays and warps together
+- `GetDisplayedBeat`, for speeds and scrolls
+
+SM 3.9's `GetElapsedTimeFromBeat`/`GetBeatAndBPSFromElapsedTime` are the small, readable version of the same idea. Restructure the result as a **precomputed segment table**:
 
 ```cpp
 struct TimingEvent { double beat; double second; enum {BPM, STOP, DELAY, WARP} type; double value; };
@@ -69,6 +79,7 @@ double beatAtSeconds(double sec)  const;   // inverse; returns stop beat while i
 - **STOP** (`#STOPS`): time advances, the beat doesn't. The note *at* the stop beat is hit **before** the stop (SM's comment: "the exact beat of a stop comes before the stop", `TimingData.cpp:166`).
 - **DELAY** (`.ssc #DELAYS`): like a stop, but the note at that beat is hit **after** the pause.
 - **WARP** (`.ssc #WARPS`): beats skipped in zero time. Notes inside are unjudgeable (later milestone).
+- **Negative BPMs and negative stops in `.sm` files become warps**, as SM5's `SMLoader::ProcessBPMsAndStops` does. ITG-era packs use this trick, and SM 3.9 doesn't handle it.
 - `#SPEEDS`/`#SCROLLS`/`#FAKES`: parse and ignore at first, then implement as visual-only effects later.
 - **Validation:** unit-test on the PC against `garcia/simfile`'s timing engine using the same files (doc 05, M4).
 
@@ -86,7 +97,18 @@ Windows (StepMania defaults, verified in SM 3.9 `PrefsManager.cpp:87-92`), all a
 | Miss | note passes −0.180 unhit | breaks |
 | Hold OK/NG | release tolerance 0.250 (SM "OK" window) | — |
 
-- On each `LaneEvent(pressed, t)`: take the **earliest unjudged note in that lane** with `|t − noteTime| ≤ BooWindow` (fixing Dance Clone's known issue "a step between two very close arrows counts for the earlier arrow instead of the closest one", `CHANGELOG v0.60`). Choose the closest note when two are inside the window.
+- On each `LaneEvent(pressed, t)`: take the **closest unjudged note in that lane** with `|t − noteTime| ≤ BooWindow`. This fixes Dance Clone's known issue "a step between two very close arrows counts for the earlier arrow instead of the closest one" (`CHANGELOG v0.60`), which v0.68 still has (`Game.cpp:2595-2605`). A press for an incomplete jump must not fall through to a later note in the same lane.
+- **Early-hit rule** (ITGmania's fix for "way off towers", `27c6f7757a`; adapted from its `Player.cpp`):
+  - An early hit graded worse than Great doesn't use up the note. Keep that grade, apply its life change once, and still accept a better re-hit.
+  - If the note passes without a re-hit, it keeps the early grade instead of becoming a Miss.
+  - This stops mashing and pad bounce from eating notes. Make it an option, on by default.
+- **Debounce** pad input in `WiiInput`, following ITGmania's `InputFilter` (default 20 ms for pads):
+  - Report a press or release at once, with its original timestamp.
+  - Hold back further changes on that panel for the window.
+  - Drop a release that is followed by a re-press inside the window.
+
+  Tune the window from the bounce measured in M3.
+- **Held misses:** record when a note is missed while its lane is held down. It flags stuck or dead panels, as ITGmania does for pad debugging.
 - **Jumps:** notes on the same row are judged individually, but combo and score treat the row as one unit (worst judgement of the row). A row completes when all its lanes are hit or missed.
 - **Holds:** the head is judged like a tap. While held, the hold is OK. If released for longer than 0.250 s before the tail, it's NG. Rolls (`4`) come later.
 - Show the timing error (ms, early or late) for calibration.
@@ -114,7 +136,15 @@ A **calibration screen** (M5) plays a click track with flashing arrows. The play
 | SFX | WAVs preloaded and played on free voices (as in Dance Clone `Sound.cpp:240-250`) | — |
 | Avoid | `MP3Player_*` for gameplay (no position query **[src: mp3player.h]**) | It's why Dance Clone needed a 109 ms fudge |
 
-Bugs in StepMania-Wii's driver that we shouldn't copy: `printf` inside the IRQ callback (`RageSoundDriver_Wii.cpp:31`), a busy-spinning fill thread (`usleep(0)`, `:57`), and position granularity of one whole buffer (`:145-157`).
+Bugs in StepMania-Wii's driver that we shouldn't copy (its author reports it crashed after a few seconds):
+- `printf` inside the IRQ callback (`RageSoundDriver_Wii.cpp:31`)
+- a busy-spinning fill thread (`usleep(0)`, `:57`) created at priority 0, libogc's idle priority (`Threads_Wii.cpp:54`)
+- a frame number of 0 passed to every `GetPCM` (`:46`, `:116`), which breaks StepMania's position map
+- a position that counts bytes queued, not played (`:28`, `:122`), with the granularity of one whole buffer (`:145-157`)
+- clipped song endings: `StopPlaying()` from the fill thread on a short read (`:49`), and full 8 KB buffers queued even when partly filled (`:33`)
+- no synchronisation between the IRQ callback and the fill thread
+
+Use `ASND_TestPointer()` / `ASND_TestVoiceBufferReady()` (`asndlib.h:354`, `:363`) so a buffer is never refilled while it is still playing.
 
 ## 5. Rendering
 
@@ -130,9 +160,9 @@ Bugs in StepMania-Wii's driver that we shouldn't copy: `printf` inside the IRQ c
 
 | Layer | Implementation | Origin |
 |---|---|---|
-| Tokenizer | `MsdParser`: splits `#KEY:v1:v2:...;`, handles `//` comments, escapes, a missing `;` before the next `#` | Port of SM 3.9 `MsdFile.cpp` (184 lines, MIT) |
-| `.sm` loader | `#TITLE #SUBTITLE #ARTIST #BANNER #BACKGROUND #MUSIC #OFFSET #BPMS #STOPS(#FREEZES) #DISPLAYBPM #SAMPLESTART #SAMPLELENGTH #NOTES` | Port of SM 3.9 `NotesLoaderSM.cpp` (549 lines, MIT) |
-| `.ssc` loader | Song header as above, plus `#VERSION #DELAYS #WARPS #SPEEDS #SCROLLS #FAKES #TIMESIGNATURES #TICKCOUNTS #COMBOS #LABELS`, then `#NOTEDATA:;` blocks with `#STEPSTYPE #DIFFICULTY #METER #NOTES`. **Per-chart timing tags override the song's** | New code, following the [ssc spec](https://github.com/stepmania/stepmania/wiki/ssc). Test against `simfile` |
+| Tokenizer | `MsdParser`: splits `#KEY:v1:v2:...;`, handles `//` comments, escapes, a missing `;` before the next `#` | Port of `MsdFile.cpp` from ITGmania `v1.3.0` (GPLv3, with escapes and the 2024 escape fix). SM 3.9's 184-line version has no escapes |
+| `.sm` loader | `#TITLE #SUBTITLE #ARTIST #BANNER #BACKGROUND #MUSIC #OFFSET #BPMS #STOPS(#FREEZES) #DELAYS #DISPLAYBPM #SAMPLESTART #SAMPLELENGTH #NOTES`. Negative BPMs and stops become warps | Port of the tag handling and `ProcessBPMsAndStops` from ITGmania `v1.3.0` `NotesLoaderSM.cpp`. SM 3.9's 549-line loader is the readable reference |
+| `.ssc` loader | Song header as above, plus `#VERSION #DELAYS #WARPS #SPEEDS #SCROLLS #FAKES #TIMESIGNATURES #TICKCOUNTS #COMBOS #LABELS`, then `#NOTEDATA:;` blocks with `#STEPSTYPE #DIFFICULTY #METER #NOTES`. **Per-chart timing tags override the song's** | Port of ITGmania `v1.3.0` `NotesLoaderSSC.cpp`, following the [ssc spec](https://github.com/stepmania/stepmania/wiki/ssc). Test against `simfile` |
 | Prefer `.ssc` | If both `Song.ssc` and `Song.sm` exist, load `.ssc` (StepMania 5 behaviour) | — |
 | Notes | For `dance-single`, each measure has *R* rows. Row *i* sits at beat `4·measure + 4·i/R`. Characters: `0` none, `1` tap, `2` hold head, `4` roll head, `3` tail, `M` mine, `L` lift, `F` fake, `K` keysound | sm spec |
 | Prototype support | taps, holds, jumps. Ignore mines, fakes and lifts at first (parse them, don't judge them). Rolls are treated as holds | — |
@@ -149,11 +179,11 @@ Boot ─► Title ─► SongSelect ─► DifficultySelect ─► Gameplay ─�
 Options (scroll speed, global offset, calibration) reachable from Title.
 ```
 
-- **SongSelect:** a list from `SongLibrary` (scans `sd:/ddrwii/songs/*/*/`), sorted by pack then title. Arrows move, Start chooses, B/Z backs out. Preview audio plays after a 0.5 s pause on an entry.
+- **SongSelect:** a list from `SongLibrary` (scans `sd:/ddrwii/songs/*/*/`), sorted by pack then title. If a pack has a `pack.ini` (ITGmania's format: a `[Group]` section with `DisplayTitle`, `SortTitle`, `Series`, `Banner`, `Year`, `SyncOffset`), use its display title, sort title and banner, and apply its `SyncOffset` (§3.2). Ported from ITGmania's `Group.cpp`. Arrows move, Start chooses, B/Z backs out. Preview audio plays after a 0.5 s pause on an entry.
 - **SongLibrary cache:** parsing headers for hundreds of songs from SD is slow, so cache `{path, mtime, title, artist, bpm range, difficulties}` in `sd:/ddrwii/cache.bin` **[exp: measure the scan time]**.
 - **Scoring (prototype):** "dance points" percentage, as in StepMania/ITG (Marvelous/Perfect = 100%, Great = 50%, Good/Boo/Miss = 0, holds OK = full credit) plus max combo and judgement counts. DDR-style money score can be added later (SM 3.9 `ScoreKeeperMAX2.cpp` as reference).
 - **High scores:** `scores.dat` is a small versioned binary or INI keyed by `songHash + difficulty`, storing the best percentage, combo and grade. It's written atomically (write a temp file, then rename).
-- **Settings:** `config.ini` holds `GlobalOffset`, `VisualOffset`, `ScrollSpeed`, `PadPort`, `LaneMap`.
+- **Settings:** `config.ini` holds `GlobalOffset`, `VisualOffset`, `DefaultSyncOffset` (`NULL` or `ITG`, for packs without `pack.ini`), `InputDebounceMs`, `ScrollSpeed`, `PadPort`, `LaneMap`.
 
 ## 8. Wii-specific lifecycle
 
