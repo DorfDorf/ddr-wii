@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // AudioClockTest - Milestone M4b scene: plays a 120 BPM click-track WAV from the SD card
-// through ASND, flashes on every beat from SongClock, and shows SongClock against ASND's
-// own voice timer (jitter, drift, underruns). Click tracks: tools/make-click-track.py,
-// staged by tools/stage-sd.sh.
+// through ASND, flashes on every beat from SongClock (driven by ASND's mixing ticks), and
+// checks it against the file content actually played (jitter, drift, underruns).
+// Click tracks: tools/make-click-track.py, staged by tools/stage-sd.sh.
 #pragma once
 
 #include <gctypes.h>
@@ -25,6 +25,7 @@ public:
 private:
     void start();
     void measure(u64 cpu_us, s64 song_us);
+    void bufferDiff(s64 diff_us);
     void draw(s64 song_us);
 
     wii::Video& video_;
@@ -35,23 +36,25 @@ private:
     wii::AudioStream stream_;
     timing::SongClock clock_;
     u32 last_report_ = 0;
+    u32 last_tick_report_ = 0;
     u64 start_cpu_us_ = 0;
 
-    // Measurements. "diff" = SongClock - ASND_GetTickCounterVoice(0), in microseconds.
+    // Measurements. "diff" = file content played (retired buffers) - SongClock, microseconds.
     s64 prev_song_us_ = -1;
     u64 prev_cpu_us_ = 0;
     u32 jitter_max_us_ = 0;      // since settling: |song step - cpu step| per frame
     u32 jitter_sec_us_ = 0;      // over the last full second
     u32 jitter_acc_us_ = 0;
     s64 diff_us_ = 0;
-    s64 diff_sum_ = 0;           // this second
+    s64 diff_sum_ = 0;           // this 10 s window
     u32 diff_n_ = 0;
-    s64 diff_avg_us_ = 0;        // last full second
+    s64 diff_avg_us_ = 0;        // last full 10 s window
     s64 diff_ref_us_ = 0;        // average over seconds 5-15: the reference for drift
     s64 diff_ref_sum_ = 0;
     u32 diff_ref_n_ = 0;
     s64 drift_min_us_ = 0, drift_max_us_ = 0;   // drift from the reference, since it was set
     u64 second_start_us_ = 0;
+    u32 seconds_ = 0;
     u32 quit_frames_ = 0;
 };
 

@@ -4,7 +4,12 @@
 // A fill thread reads the file into a ring of kChunks buffers. The ASND voice callback
 // (interrupt level, once per 21.3 ms mixing tick while ASND's second slot is empty) retires
 // buffers ASND no longer points at, counts their frames as played, and queues the next one.
-// Each retirement is a position report {gettime(), frames played} for core/timing/SongClock.
+// Two position reports:
+//   - tick report: every ASND mixing tick, {gettime(), ticks mixed}. One tick is 1024 samples
+//     at 48 kHz (64000/3 us) at any voice rate. This drives core/timing/SongClock.
+//   - buffer report: each retired buffer, {gettime(), frames of the file played}. Coarser and
+//     late by a rate-dependent amount, but it counts real file content, so comparing it with
+//     SongClock shows underruns and drift.
 //
 // Re-implemented from the asndlib docs and source; no StepMania-Wii code (doc 07 §6).
 #pragma once
@@ -47,7 +52,15 @@ public:
     int channels() const { return channels_; }
     u32 totalFrames() const { return total_frames_; }
 
-    Report report() const;       // latest position report, read with interrupts off
+    struct TickReport {
+        u64 tick = 0;            // gettime() at the mixing tick
+        u32 ticks = 0;           // ticks mixed since play()
+        u32 count = 0;           // increments with every report
+    };
+    static constexpr u32 kTickUsNum = 64000, kTickUsDen = 3;   // one tick = 64000/3 us
+
+    Report report() const;           // latest buffer report, read with interrupts off
+    TickReport tickReport() const;   // latest tick report
     Stats stats() const;
 
 private:

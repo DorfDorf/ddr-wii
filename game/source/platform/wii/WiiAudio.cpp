@@ -29,15 +29,30 @@ volatile bool g_active = false;  // the callback may touch the ring
 volatile u64 g_played = 0;       // frames of retired chunks
 volatile u64 g_report_tick = 0;
 volatile u32 g_report_count = 0;
+volatile u64 g_tick_time = 0;    // gettime() at the latest ASND mixing tick
+volatile u32 g_tick_count = 0;   // ASND_GetTickCounterVoice(0) at that tick
+volatile u32 g_tick_reports = 0;
 volatile u32 g_underruns = 0;
 volatile u32 g_ring_min = N;
 
 }  // namespace
 
+// Interrupt level, once per ASND mixing tick (1024 samples at 48 kHz). The voice's tick
+// counter advances by one per tick whatever the voice's sample rate, so this report is late
+// by the same amount at every rate. The buffer reports in voiceCallback aren't: at 44.1 kHz a
+// buffer ends part-way through a tick (doc 06 §4).
+static void tickCallback() {
+    if (!g_active) return;
+    g_tick_time = gettime();
+    g_tick_count = ASND_GetTickCounterVoice(0) / ASND_GetSamplesPerTick();
+    g_tick_reports = g_tick_reports + 1;
+}
+
 void AudioStream::initAsnd() {
     static bool done = false;
     if (done) return;
     ASND_Init();
+    ASND_SetCallback(tickCallback);
     ASND_Pause(0);
     done = true;
 }
@@ -135,6 +150,9 @@ bool AudioStream::open(const char* path) {
     g_played = 0;
     g_report_tick = 0;
     g_report_count = 0;
+    g_tick_time = 0;
+    g_tick_count = 0;
+    g_tick_reports = 0;
     g_underruns = 0;
     g_ring_min = N;
 
@@ -178,6 +196,16 @@ AudioStream::Report AudioStream::report() const {
     r.tick = g_report_tick;
     r.frames = g_played;
     r.count = g_report_count;
+    IRQ_Restore(level);
+    return r;
+}
+
+AudioStream::TickReport AudioStream::tickReport() const {
+    TickReport r;
+    const u32 level = IRQ_Disable();
+    r.tick = g_tick_time;
+    r.ticks = g_tick_count;
+    r.count = g_tick_reports;
     IRQ_Restore(level);
     return r;
 }
