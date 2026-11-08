@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Boot a .dol/.elf in Dolphin. Usage: tools/run-dolphin.sh path/to/app.dol
+# Boot a .dol/.elf in Dolphin. Usage: tools/run-dolphin.sh path/to/app.dol [dolphin args...]
 #
 # DOLPHIN overrides the emulator path (default: the portable install in
 # %USERPROFILE%\Dolphin-x64). Dolphin runs in batch mode (-b), so it closes
 # when emulation stops and the next run starts clean.
+# Extra arguments go to Dolphin, e.g. per-run config overrides:
+#   tools/run-dolphin.sh game/game.dol -C SYSCONF.IPL.E60=False
+# From make: make -C game run-dolphin DOLPHIN_ARGS="-C SYSCONF.IPL.E60=False"
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
@@ -33,8 +36,9 @@ fi
 taskkill //IM Dolphin.exe //F >/dev/null 2>&1 || true
 
 app="$(cygpath -w "$(realpath "$1")")"
-echo "Booting $app in Dolphin"
+shift
+echo "Booting $app in Dolphin${*:+ ($*)}"
 # Launch through `cmd /c start` so Dolphin is fully detached: a plain `&` leaves it
 # holding this shell's output pipe, and make / the VS Code task never return.
 # cmd's own stdio goes to /dev/null too, because `start` hands its handles to Dolphin.
-cmd.exe //c start "" "$(cygpath -w "$DOLPHIN")" -b -e "$app" </dev/null >/dev/null 2>&1
+cmd.exe //c start "" "$(cygpath -w "$DOLPHIN")" -b "$@" -e "$app" </dev/null >/dev/null 2>&1

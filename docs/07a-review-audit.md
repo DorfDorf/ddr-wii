@@ -6,7 +6,7 @@
 
 ## Verdict
 
-**Doc 07's bottom line holds.** Don't build on either codebase. Port StepMania 3.9's timing and chart code, and write a new GRRLIB/ASND engine. Most file and line citations are accurate (see §4).
+**Doc 07's bottom line holds.** Don't build on either codebase. Port the StepMania timing and chart code, and write a new GRRLIB/ASND engine. (Since this audit, doc 02 takes that code from ITGmania `v1.3.0`, GPLv3, with StepMania 3.9 as the readable reference.) Most file and line citations are accurate (see §4).
 
 But four gaps matter:
 
@@ -256,7 +256,7 @@ The "don't build SM-Wii" verdict is unchanged.
   - The crash handler uses `execve`/`fork`.
   - The `emulate:` target uses gcube.
   - `-ldb` still exists in libogc (`libdb/`).
-- **StepMania 3.9 code to port:**
+- **StepMania 3.9 reference code** (the port itself now comes from ITGmania `v1.3.0`):
   - `TimingData` is 281 + 89 lines, with its functions at `:98` and `:159`.
   - `MsdFile` is 184 lines.
   - `NotesLoaderSM` is 549 lines. It handles OFFSET, BPMS and STOPS/FREEZES, with no DELAYS or WARPS.

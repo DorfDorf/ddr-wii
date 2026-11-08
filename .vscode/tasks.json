@@ -5,11 +5,63 @@
   },
   "tasks": [
     {
+      "label": "game: build",
+      "type": "process",
+      "command": "C:/devkitPro/msys2/usr/bin/bash.exe",
+      "args": ["-lc", "make -C game"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": {
+        "base": "$gcc",
+        "fileLocation": ["autoDetect", "${workspaceFolder}/game/build"]
+      }
+    },
+    {
+      "label": "game: run in Dolphin",
+      "type": "process",
+      "command": "C:/devkitPro/msys2/usr/bin/bash.exe",
+      "args": ["-lc", "make -C game run-dolphin"],
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": {
+        "base": "$gcc",
+        "fileLocation": ["autoDetect", "${workspaceFolder}/game/build"]
+      }
+    },
+    {
+      "label": "game: run in Dolphin (NTSC)",
+      "type": "process",
+      "command": "C:/devkitPro/msys2/usr/bin/bash.exe",
+      "args": ["-lc", "make -C game run-dolphin DOLPHIN_ARGS='-C Dolphin.Core.FallbackRegion=1'"],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "game: run in Dolphin (PAL50)",
+      "type": "process",
+      "command": "C:/devkitPro/msys2/usr/bin/bash.exe",
+      "args": ["-lc", "make -C game run-dolphin DOLPHIN_ARGS='-C Dolphin.Core.FallbackRegion=2 -C SYSCONF.IPL.E60=False'"],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "game: clean",
+      "type": "process",
+      "command": "C:/devkitPro/msys2/usr/bin/bash.exe",
+      "args": ["-lc", "make -C game clean"],
+      "problemMatcher": []
+    },
+    {
+      "label": "game: send to Wii (wiiload)",
+      "type": "process",
+      "command": "C:/devkitPro/msys2/usr/bin/bash.exe",
+      "args": ["-lc", "make -C game run"],
+      "problemMatcher": []
+    },
+    {
       "label": "padtest: build",
       "type": "process",
       "command": "C:/devkitPro/msys2/usr/bin/bash.exe",
       "args": ["-lc", "make -C tools/padtest"],
-      "group": { "kind": "build", "isDefault": true },
+      "group": "build",
       "problemMatcher": {
         "base": "$gcc",
         "fileLocation": ["autoDetect", "${workspaceFolder}/tools/padtest/build"]

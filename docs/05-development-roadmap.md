@@ -17,7 +17,7 @@ Claude writes the code, the build scripts and the host-side tests, and can run t
 Claude can also watch Dolphin directly (screenshots via computer use, or reading the log window) to check on-screen results in emulation without you. Real-hardware checks still need you.
 
 ```
-M1 Toolchain ─► M2 Graphics ─► M3 Pad test (Dolphin + real Wii) ─► M4b Audio clock ─► M4c Rhythm core ─► M5 Playable ─► M6 Hardware polish
+M1 Toolchain ─► M2 Graphics (+ M2b 2P/4P stress) ─► M3 Pad test (Dolphin + real Wii) ─► M4b Audio clock ─► M4c Rhythm core ─► M5 Playable ─► M6 Hardware polish
                        M4a Chart parser + timing on PC (can start any time after M1) ──────────┘
      (optional) M1.5 Dance Clone reference build
 ```
@@ -62,6 +62,29 @@ M1 Toolchain ─► M2 Graphics ─► M3 Pad test (Dolphin + real Wii) ─► M
 | **Risks** | Texture format/alignment errors (GRRLIB handles them). Getting the link order right |
 | **Reuse** | Placeholder arrow PNGs can be borrowed from Dance Clone `Media/Game/*.png` for local testing only (licence unclear, so don't ship them) |
 
+## M2b — Multi-playfield stress test (2 and 4 players)
+
+| | |
+|---|---|
+| **Needs you** | Nothing in Dolphin. On the real Wii (with M3's setup): boot it, read the overlay, and look at the 4-player layout from where you'd stand to play |
+| **Objective** | Find out whether 2 and 4 playfields hold full frame rate on real hardware, and whether 4P arrows are readable (doc 06 §11) |
+| **Steps** | Add a mode to `RenderTest` that draws 1, 2 or 4 playfields from the doc 06 §11.3 layout table, each with a dense worst-case stream: 16ths at high scroll speed, long hold bodies, explosion and receptor-glow quads (large and alpha-blended), and per-player judgement, combo and score text in the bitmap font. Cycle 1 → 2 → 4 players automatically, like the existing sprite ramp, and show per step: worst frame time, dropped frames, CPU time from frame start to the vsync wait, draw count, texture switches and total drawn pixel area (doc 06 §11.5) |
+| **Test** | Dolphin in NTSC, PAL60 and PAL50 first. It catches logic and layout bugs, and its CPU time and draw counts show where the budget goes (its CPU time is a lower bound; it says nothing about GPU cost). Then the **real Wii**, sent over Wi-Fi with `WIILOAD=tcp:<wii-ip> make -C game run` (no SD card swap). Only the hardware numbers decide |
+| **Success** | 2P: no dropped frames on hardware, with headroom (worst frame < 12 ms of 16.7). 4P: no dropped frames on hardware, and you can read 36 px arrows at your playing distance. If 4P fails on either count, it stays 2P-only or tries the 16:9 layout |
+| **Risks** | CPU cost per GRRLIB draw call and per texture switch (the likely limit; fixes are an arrow atlas and batched GX draws per playfield). Fill rate from large alpha-blended quads is estimated at ~10% of the GPU's ceiling, so it's unlikely. Text drawing cost |
+| **Status** | Built (`game/source/screens/PlayfieldStress.*`, counters in `render/Draw.*`, GPU wait in `WiiVideo`). The game boots into it; B switches to the M2 scene. **Dolphin passed** (PAL60 480i): no dropped frames at any player count. **Real-Wii run still to do** |
+
+Dolphin results (2026-11-08; per frame, scene only; CPU time is a lower bound and GPU wait reads 0 in Dolphin):
+
+| Players | Frame avg / max (ms) | CPU avg / max (ms) | Dropped | Draws | Texture switches | Drawn area (Mpx) |
+|---|---|---|---|---|---|---|
+| 1 | 16.68 / 16.68 | 0.99 / 1.00 | 0 | 107 | 17 | 0.77 |
+| 2 | 16.68 / 16.68 | 1.19 / 1.20 | 0 | 190 | 34 | 1.21 |
+| 3 | 16.68 / 16.68 | 1.61 / 1.62 | 0 | 368 | 62 | 0.98 |
+| 4 | 16.68 / 16.68 | 1.88 / 1.89 | 0 | 483 | 82 | 1.19 |
+
+The drawn area is below doc 06's 1.5 Mpx estimate. The 3–4P fields draw more sprites but smaller ones, so area doesn't grow with player count. On hardware, compare the CPU column against Dolphin's: if 4P CPU time stays a few ms, the draw-call worry in doc 06 §11.5 is settled.
+
 ## M3 — Controller input: Dolphin **and** the real Wii
 
 | | |
@@ -69,12 +92,12 @@ M1 Toolchain ─► M2 Graphics ─► M3 Pad test (Dolphin + real Wii) ─► M
 | **Needs you** | **This is the main gate.** Softmod the Wii if it isn't already (follow wii.hacks.guide, make a NAND backup), put padtest on the SD card, stand on the mat and read the screen back to Claude (or send a photo) |
 | **Objective** | Prove the GameCube dance mat reaches our code correctly, including jumps and timestamps |
 | **Tools** | `padtest.dol`, the Dolphin keyboard profile (doc 03 §4.4), **Wii with HBC** (doc 03 §6), SD card or wiiload |
-| **Steps** | (a) Dolphin: keyboard-mapped Standard Controller. (b) Real Wii: mat in port 1, run padtest via HBC. (c) Optional: the mat via a Wii U GC adapter in Dolphin |
+| **Steps** | (a) Dolphin: keyboard-mapped Standard Controller. (b) Real Wii: mat in port 1, run padtest via HBC. (c) Optional: the mat via a Wii U GC adapter in Dolphin. (d) If a second mat (or any GC controller) is available: plug it into port 2 and check that both ports report independently, with no change to the sampling interval. Repeat with all four ports filled if you have the devices. Also run the M2b stress test on the hardware |
 | **Output** | A recorded table: mat SI type, per-panel bits, max simultaneous panels, PAD sample interval min/max, and how long each panel bounces on press and release. That sets the debounce window; ITGmania defaults to 20 ms for pads |
 | **Success** | Mat shows `GC standard (PAD ok)`. All 4 arrows map correctly. L+R and U+D jumps register. Releases clear within one frame. Sampling interval measured |
 | **Risks** | Mat reports a non-standard SI type (low likelihood, doc 04 §3; fallback is raw SI reads). The keyboard can't hold some 3-key combinations (a hardware limit). Installing HBC (follow wii.hacks.guide, make a NAND backup) |
 | **Reuse** | Dance Clone `WiiInput.cpp` approach (reference) |
-| **Then** | Integrate as `platform/wii/WiiInput` with timestamped, debounced `LaneEvent`s (doc 04 §8, doc 06 §3.4). Show lane states on the M2 scene. Add held-miss logging for stuck-panel diagnosis |
+| **Then** | Integrate as `platform/wii/WiiInput` with timestamped, debounced `LaneEvent`s (doc 04 §8, doc 06 §3.4), tagged by port with debounce state per port. Show lane states on the M2 scene, one playfield per connected port. Add held-miss logging for stuck-panel diagnosis |
 
 ## M4a — Chart parser + timing engine on the PC (can run in parallel)
 
@@ -107,9 +130,9 @@ M1 Toolchain ─► M2 Graphics ─► M3 Pad test (Dolphin + real Wii) ─► M
 |---|---|
 | **Needs you** | Play test songs (keyboard in Dolphin, then the mat on the Wii) and report how it feels. Autoplay correctness can be checked without you |
 | **Objective** | One hard-coded song: scrolling arrows in sync, hits judged, basic score |
-| **Steps** | Load one `.sm` (M4a) + its audio (M4b). Render notes by beat (doc 06 §3.2). Judge with timestamped LaneEvents (§3.4). Show judgement, ms error, combo and score. Results screen |
-| **Test** | Play a simple 4th-note chart with the keyboard in Dolphin, then with the mat on the Wii. Use the "autoplay" debug mode (perfect inputs generated from the chart): every judgement must be Marvelous |
-| **Success** | Autoplay gives 100% Marvelous. A human gets consistent ms error (a stable mean, which is the latency to calibrate away). Holds work |
+| **Steps** | Load one `.sm` (M4a) + its audio (M4b). Render notes by beat (doc 06 §3.2). Judge with timestamped LaneEvents (§3.4). Show judgement, ms error, combo and score. Results screen. Build judging, score and rendering **per player** from the start (doc 06 §11.1), with players bound by port |
+| **Test** | Play a simple 4th-note chart with the keyboard in Dolphin, then with the mat on the Wii. Use the "autoplay" debug mode (perfect inputs generated from the chart): every judgement must be Marvelous. Run 2P with the human as P1 and autoplay as P2 on a different difficulty, then 4P with three autoplay players |
+| **Success** | Autoplay gives 100% Marvelous. A human gets consistent ms error (a stable mean, which is the latency to calibrate away). Holds work. A human's judgements are the same with autoplay players on screen as without |
 | **Risks** | Input-to-song-time conversion bugs (caught by autoplay) |
 | **Reuse** | Dance Clone judgement/jump logic as reference. ITGmania's early-hit rule (doc 06 §3.4), ported from `v1.3.0` |
 
@@ -119,7 +142,7 @@ M1 Toolchain ─► M2 Graphics ─► M3 Pad test (Dolphin + real Wii) ─► M
 |---|---|
 | **Needs you** | Copy your song packs to the SD card, play many sessions, report crashes and bad charts. Most of the code is routine for Claude |
 | **Objective** | A real game loop over many songs |
-| **Features** | SongLibrary scan + cache (with `pack.ini` titles, banners and `SyncOffset`), song wheel with banners and preview audio, difficulty select (Beginner…Challenge), scroll speed option, life bar + fail, results with grade, high scores saved to SD, **offset calibration screen**, `config.ini` |
+| **Features** | SongLibrary scan + cache (with `pack.ini` titles, banners and `SyncOffset`), song wheel with banners and preview audio, difficulty select (Beginner…Challenge), scroll speed option, life bar + fail, results with grade, high scores saved to SD, **offset calibration screen**, `config.ini`. **2-player mode:** Start-to-join per port, per-player difficulty and scroll speed, side-by-side results (doc 06 §11). 4 players if M2b passed |
 | **Test** | 50+ songs from your own StepMania packs (a mix of .sm and .ssc, OGG and MP3) |
 | **Success** | Start → choose song → play → results → back, repeated 20 times without a crash or leak (watch the heap display). Library scan < 5 s with the cache |
 | **Risks** | SD scan speed. Memory fragmentation from repeated song loads (fix: fixed MEM2 arenas). Odd simfiles |
@@ -131,8 +154,8 @@ M1 Toolchain ─► M2 Graphics ─► M3 Pad test (Dolphin + real Wii) ─► M
 |---|---|
 | **Needs you** | Entirely hands-on: calibration on your TV, long play sessions |
 | **Objective** | Feels right on your TV with your mat |
-| **Steps** | Package `apps/ddrwii/` (boot.dol, meta.xml, icon.png) + `ddrwii/songs/`. Calibrate the global offset on your TV (Game mode on). Run a long session (an hour of play). Check PAL/NTSC/480p if relevant. Optionally test a second mat model |
-| **Success** | Calibrated mean error within ±5 ms. No audio dropouts. No missed jumps. Stable for an hour |
+| **Steps** | Package `apps/ddrwii/` (boot.dol, meta.xml, icon.png) + `ddrwii/songs/`. Calibrate the global offset on your TV (Game mode on). Run a long session (an hour of play). Check PAL/NTSC/480p if relevant. Play real 2-player sessions on two mats, and 4-player if supported. Optionally test a second mat model, and set a per-port `InputOffset` if two mats measure differently |
+| **Success** | Calibrated mean error within ±5 ms. No audio dropouts. No missed jumps. Stable for an hour. 2P sessions hold frame rate with both mats in play |
 | **Risks** | TV latency (calibration), SD card quality, mat wear (dead panels look like software bugs, so padtest helps tell them apart) |
 
 ---
@@ -143,6 +166,7 @@ M1 Toolchain ─► M2 Graphics ─► M3 Pad test (Dolphin + real Wii) ─► M
 |---|---|
 | M1 | `padtest.dol` builds from VS Code and boots in Dolphin |
 | M2 | 60 fps scene with receptors + 200 sprites |
+| M2b | 2 playfields hold frame rate on the real Wii. 4P decided (frame rate + readability) |
 | M3 | Real mat on the real Wii: 4 arrows + jumps confirmed, SI type recorded |
 | M4a | Parser/timing match `simfile` within 0.1 ms on the test corpus |
 | M4b | 5-minute song, no underruns, clock jitter < 1 ms, drift < 2 ms |

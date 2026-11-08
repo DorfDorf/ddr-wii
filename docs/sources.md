@@ -90,8 +90,8 @@
 
 | File | Topic |
 |---|---|
-| `reference/extracted/stepmaniawii/stepmania-wii/trunk/TimingData.cpp` (identical to upstream `v390release`) | Beat↔time algorithm, offset sign convention |
-| `…/trunk/MsdFile.cpp`, `…/trunk/NotesLoaderSM.cpp` | .sm parsing |
+| `reference/extracted/stepmaniawii/stepmania-wii/trunk/TimingData.cpp` (identical to upstream `v390release`) | Beat↔time algorithm, offset sign convention (readable reference; the port comes from ITGmania `v1.3.0`) |
+| `…/trunk/MsdFile.cpp`, `…/trunk/NotesLoaderSM.cpp` | .sm parsing (readable reference, as above) |
 | `…/trunk/PrefsManager.cpp:87-92` | StepMania judge windows (22.5/45/90/135/180 ms) |
 | `…/trunk/arch/Sound/RageSoundDriver_Wii.cpp` | ASND streaming pattern |
 | `…/trunk/arch/InputHandler/InputHandler_Wii.cpp` | PAD/WPAD input |

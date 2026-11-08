@@ -276,7 +276,8 @@ Legend: **Reuse** = copy with attribution. **Port** = rewrite closely following 
 
 | Source | Licence | Implication |
 |---|---|---|
-| StepMania 3.9 code (`TimingData`, `MsdFile`, `NotesLoaderSM`, …) | MIT-style (Chris Danford, Glenn Maynard et al.) | You may port or copy into any project. **Keep the copyright and permission notice** in the ported files. Take them from upstream `stepmania/stepmania` tag `v390release`; the SM-Wii copies are identical, but upstream keeps the provenance clean |
+| StepMania 3.9 code (`TimingData`, `MsdFile`, `NotesLoaderSM`, …) | MIT-style (Chris Danford, Glenn Maynard et al.) | You may port or copy into any project. **Keep the copyright and permission notice** in the ported files. Take them from upstream `stepmania/stepmania` tag `v390release`; the SM-Wii copies are identical, but upstream keeps the provenance clean. This project ports the SM5-era versions from ITGmania `v1.3.0` instead (doc 02) and uses these as the readable reference |
+| ITGmania `v1.3.0` (`MsdFile`, `TimingData`/`TimingSegments`, `NotesLoaderSM`/`SSC`, `InputFilter`, `Group`, …) | **GPLv3** (MIT up to `v0.9.0`) | Compatible with this project's GPL-3.0-or-later. Keep the original notices and mark our changes (doc 02) |
 | StepMania-Wii's own Wii files (`RageDisplay_GX.*`, `ArchHooks_Wii.*`, `InputHandler_Wii.cpp`, `RageSoundDriver_Wii.*`, `Threads_Wii.*`, `arch_wii.h`) | **No licence text in the files.** The project was published as **GPL v2** | Treat as GPL v2, possibly v2-only, which can't be combined with our GPLv3. Re-implement ideas; don't copy code |
 | `libresample` (bundled in SM-Wii) | LGPL | Not needed |
 | Dance Clone | **Ambiguous:** COPYING = LGPL 2.1, file headers = **GPL v2+** | Both allow use in a GPLv3 project, which this project now is (doc 02). It's usable, but its code quality makes it mostly a reference |
