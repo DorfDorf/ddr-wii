@@ -7,14 +7,15 @@
 
 #include <gctypes.h>
 
-namespace wii { class Video; }
+namespace wii { class Video; class Input; }
 namespace render { struct ArrowArt; class Font; }
 
 namespace screens {
 
 class PlayfieldStress {
 public:
-    PlayfieldStress(wii::Video& video, const render::ArrowArt& art, const render::Font& font);
+    PlayfieldStress(wii::Video& video, const wii::Input& input, const render::ArrowArt& art,
+                    const render::Font& font);
 
     // Runs one frame of logic + drawing (does not present). Pads must already be scanned.
     // Returns false to quit.
@@ -44,6 +45,7 @@ private:
     void drawOverlay();
 
     wii::Video& video_;
+    const wii::Input& input_;
     const render::ArrowArt& art_;
     const render::Font& font_;
 

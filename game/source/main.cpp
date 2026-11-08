@@ -4,6 +4,7 @@
 #include <gccore.h>
 #include <stdlib.h>
 
+#include "platform/wii/WiiInput.h"
 #include "platform/wii/WiiVideo.h"
 #include "render/ArrowArt.h"
 #include "render/Font.h"
@@ -14,12 +15,12 @@ namespace {
 
 // Runs one scene until it quits (returns false) or B is pressed (returns true).
 template <typename Scene>
-bool runScene(wii::Video& video, Scene& scene) {
+bool runScene(wii::Video& video, wii::Input& input, Scene& scene) {
     video.resetStats();
     for (;;) {
         video.beginFrame();
-        PAD_ScanPads();
-        if (PAD_ButtonsDown(0) & PAD_BUTTON_B) return true;
+        input.update();   // drains the timestamped SI samples; scenes read input from here
+        if (input.down(0) & PAD_BUTTON_B) return true;
         const bool running = scene.frame();
         video.endFrame();
         if (!running) return false;
@@ -31,7 +32,8 @@ bool runScene(wii::Video& video, Scene& scene) {
 int main(int, char**) {
     wii::Video video;
     if (!video.init()) return EXIT_FAILURE;
-    PAD_Init();
+    wii::Input input;
+    input.init();
 
     render::ArrowArt art;
     render::Font font;
@@ -44,16 +46,17 @@ int main(int, char**) {
     for (;;) {
         bool next;
         if (stress) {
-            screens::PlayfieldStress scene(video, art, font);
-            next = runScene(video, scene);
+            screens::PlayfieldStress scene(video, input, art, font);
+            next = runScene(video, input, scene);
         } else {
-            screens::RenderTest scene(video, art, font);
-            next = runScene(video, scene);
+            screens::RenderTest scene(video, input, art, font);
+            next = runScene(video, input, scene);
         }
         if (!next) break;
         stress = !stress;
     }
 
+    input.shutdown();
     font.destroy();
     art.destroy();
     video.shutdown();

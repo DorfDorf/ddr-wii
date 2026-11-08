@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<app version="1">
+  <name>DDR Wii</name>
+  <coder>ddr-wii</coder>
+  <version>0.1-dev</version>
+  <short_description>Four-panel rhythm game (dev build)</short_description>
+  <long_description>StepMania-chart rhythm game for GameCube dance pads. This development build boots into the playfield stress test; B switches to the render test. Hold START+Z for 2 seconds to exit.</long_description>
+</app>

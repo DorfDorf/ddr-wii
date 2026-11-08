@@ -5,14 +5,15 @@
 
 #include <gctypes.h>
 
-namespace wii { class Video; }
+namespace wii { class Video; class Input; }
 namespace render { struct ArrowArt; class Font; }
 
 namespace screens {
 
 class RenderTest {
 public:
-    RenderTest(wii::Video& video, const render::ArrowArt& art, const render::Font& font);
+    RenderTest(wii::Video& video, const wii::Input& input, const render::ArrowArt& art,
+               const render::Font& font);
 
     // Runs one frame of logic + drawing (does not present). Returns false to quit.
     bool frame();
@@ -37,11 +38,18 @@ private:
     void drawOverlay();
 
     wii::Video& video_;
+    const wii::Input& input_;
     const render::ArrowArt& art_;
     const render::Font& font_;
 
     u64 start_ticks_ = 0;
     u16 held_ = 0;
+    // Last lane press, for the input line of the overlay.
+    int last_lane_ = -1;
+    int last_port_ = 0;
+    u32 last_age_us_ = 0;      // how long before this frame's input update it was sampled
+    u32 max_age_us_ = 0;
+    u32 presses_ = 0;
     u32 quit_frames_ = 0;
 
     bool auto_ = true;

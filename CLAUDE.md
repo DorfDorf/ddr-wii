@@ -39,6 +39,7 @@ Run the PC tests before committing changes to `game/source/core/`, and build the
 - GPLv3, so chart and timing code can be ported from ITGmania v1.3.0 (doc 02).
 - Audio plays through ASND, and the audio sample count is the master song clock (doc 06 §3–4).
 - The dance mat is read as a standard GameCube controller, one mat per port (doc 04).
+- The game reads pads only through `wii::Input` (SI polling interrupt + `PAD_Read`, timestamped and debounced), never `PAD_ScanPads`/`PAD_ButtonsHeld`: SI gives each new sample to one reader. libogc 3.2.1's `PAD_SetSamplingCallback` is a no-op (doc 04 §5).
 - 2 players now, 4 after M6 (doc 06 §11). Playfields stay inside the TV's safe area (doc 06 §11.3).
 
 ## Docs

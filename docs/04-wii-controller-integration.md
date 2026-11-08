@@ -107,8 +107,9 @@ Dance Clone's notes say the same: "minus → Z / MENU, plus → START, B, A, LEF
 
 - If you call `PAD_ScanPads()` once per frame, a press is timestamped with **≤ 16.7 ms** of error at 60 Hz (20 ms at PAL 50 Hz). That's coarser than a "Marvelous" window (±22.5 ms in StepMania), which isn't good enough for strict judging.
 - **Better (to test in M3):**
-  1. Register `PAD_SetSamplingCallback(cb)` **[src: prototype in `pad.h`]**. The callback runs whenever new SI samples are taken. Inside it, read the buttons and push `{gettime(), buttons}` into a ring buffer. The main loop drains the buffer and judges with the real timestamps.
-  2. Measure how often the callback fires (SI polling is tied to video lines, so expect a few times per frame **[exp]**). If needed, raise the SI poll rate (libogc's SI API; libogc2 adds `PAD_SetSamplingRate`) **[exp]**.
+  1. Run a handler on every SI poll. Inside it, read the buttons and push `{gettime(), buttons}` into a ring buffer. The main loop drains the buffer and judges with the real timestamps.
+     **Found in M3 (2026-11-08): `PAD_SetSamplingCallback` never fires in libogc 3.2.1.** It stores the callback, but the internal polling handler it registers (`__pad_samplinghandler`, `libogc/pad.c:456`) is an empty function that never calls it. padtest showed `PAD samples: 0` in Dolphin and on a real Wii. **Use `SI_RegisterPollingHandler(handler)` (`si.h`, handler type `void (u32 irq, void *ctx)`) directly instead.** SI's RDST interrupt calls it after each poll (`si.c` `__si_interrupthandler`). With that, Dolphin gives about 119 samples/s (2 per frame), with intervals from 0.27 ms to 15.6 ms. **[exp]** Real-Wii rate pending.
+  2. Measure how often the handler fires (SI polling is tied to video lines). If needed, raise the SI poll rate (`SI_SetSamplingRate`; libogc2 adds `PAD_SetSamplingRate`) **[exp]**.
 - Whatever the input rate, **convert input timestamps to song time with the same clock the audio uses** (doc 06 §3).
 
 ## 6. Input test program (Milestone 3)
@@ -132,7 +133,7 @@ static volatile u32 sample_count = 0, min_us = 0xFFFFFFFF, max_us = 0;
 // Called by libogc each time new SI pad data is sampled (timestamping experiment).
 // [exp] confirm the `sampling_callback` typedef in your pad.h is `void (*)(void)`; it runs in
 // interrupt context, so keep it tiny (no printf, no malloc).
-static void on_pad_sample(void) {
+static void on_pad_sample(u32 irq, void *ctx) {   // RDSTHandler signature (si.h)
     u64 now = gettime();
     if (last_sample_tick) {
         u32 us = (u32)diff_usec(last_sample_tick, now);
@@ -165,7 +166,7 @@ int main(int argc, char **argv) {
     VIDEO_WaitVSync();
     if (rmode->viTVMode & VI_NON_INTERLACE) VIDEO_WaitVSync();
 
-    PAD_SetSamplingCallback(on_pad_sample);
+    SI_RegisterPollingHandler(on_pad_sample);   // not PAD_SetSamplingCallback: see §5 (libogc 3.2.1 stub)
 
     int max_simultaneous[4] = {0};
     u32 quit_frames = 0;
@@ -234,6 +235,8 @@ If the mat shows `GC non-standard (PAD rejects)`, PAD can't read it. The fallbac
 | Verdict | **Best reference for the design.** Re-implement cleanly | Fine, but less DDR-specific |
 
 ## 8. Recommended input module (summary; see doc 06)
+
+**Built in M3** as `game/source/platform/wii/WiiInput.*` (Wii side) and `game/source/core/input/InputFilter.*` (portable debounce + `LaneEvent`, tested on the PC). The producer is the SI polling interrupt (`SI_RegisterPollingHandler`, see §5), which calls `PAD_Read` and queues `{gettime(), buttons}` for all four ports. If it never fires, `update()` falls back to one `PAD_Read` per frame. Because SI hands each new sample to only one reader, the game reads pads only through `wii::Input`, never `PAD_ScanPads` (padtest still uses `PAD_ScanPads`, with a counting-only handler).
 
 ```c
 struct LaneEvent { u64 tick; u8 port; u8 lane; bool pressed; };

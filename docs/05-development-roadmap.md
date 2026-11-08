@@ -60,7 +60,8 @@ M1 Toolchain ─► M2 Graphics (+ M2b 2P/4P stress) ─► M3 Pad test (Dolphin
 | **Test** | Dolphin, NTSC and PAL60 settings. Frame-time overlay |
 | **Success** | Steady 60 fps (16.7 ms frame), with ≥ 200 arrow sprites drawn without dropping frames |
 | **Risks** | Texture format/alignment errors (GRRLIB handles them). Getting the link order right |
-| **Reuse** | Placeholder arrow PNGs can be borrowed from Dance Clone `Media/Game/*.png` for local testing only (licence unclear, so don't ship them) |
+| **Reuse** | Placeholder arrow PNGs can be borrowed from Dance Clone `Media/Game/*.png` for local testing only (licence unclear, so don't ship them). Not needed in the end: all art is generated in code (`render/ArrowArt`) |
+| **Status** | **Done.** `screens/RenderTest` (B from the M2b scene). **Dolphin** (2026-11-08): NTSC 480i, PAL60 480i and PAL50 528i all hold full refresh with 0 dropped frames at every step up to 1600 sprites. **Real Wii** (2026-11-08, PAL60 480p, photo of the TV): every step 0–1600 sprites averaged 16.68 ms per frame (max 16.7) with 0 dropped frames, and CPU busy time was 4.20 / 4.21 ms avg / max at 1600 sprites. That's 8× the 200-sprite target with about 75% of the frame to spare |
 
 ## M2b — Multi-playfield stress test (2 and 4 players)
 
@@ -113,6 +114,7 @@ What it shows:
 | **Risks** | Mat reports a non-standard SI type (low likelihood, doc 04 §3; fallback is raw SI reads). The keyboard can't hold some 3-key combinations (a hardware limit). Installing HBC (follow wii.hacks.guide, make a NAND backup) |
 | **Reuse** | Dance Clone `WiiInput.cpp` approach (reference) |
 | **Then** | Integrate as `platform/wii/WiiInput` with timestamped, debounced `LaneEvent`s (doc 04 §8, doc 06 §3.4), tagged by port with debounce state per port. Show lane states on the M2 scene, one playfield per connected port. Add held-miss logging for stuck-panel diagnosis |
+| **Status** | **Mostly passed on the real Wii** (2026-11-08, padtest via HBC, photos of the TV). Mat in port 1: `SI=0x09000300 GC standard (PAD ok)`. Arrows arrive as D-pad bits (`held=0x0003` = L+R, `0x000C` = D+U). All 4 panels map correctly, `max-at-once` reached 4 (L+R and U+D jumps both register), and there was no sticking or flicker on release. **Open:** (1) the timestamp hook. `PAD_SetSamplingCallback` is a stub in libogc 3.2.1 (doc 04 §5), so padtest now uses `SI_RegisterPollingHandler`. Dolphin gives ~119 samples/s; the real-Wii rate and interval need one more padtest run. (2) All four ports reported `[conn]` with the same `0x09000300` on the Wii, while Dolphin's empty ports read `0x00000008 none`. Check whether other devices were plugged in. If not, `PAD_ScanPads`' connected mask can't be trusted for joining, and players must join by pressing START (doc 06 §11.2). (3) Panel bounce duration (debounce window) isn't measured yet. **Then-step built** (branch `m3-wii-input`): `platform/wii/WiiInput` reads all ports from the SI polling interrupt into a lock-free ring, debounces per port with `core/input/InputFilter` (20 ms, PC-tested), and gives timestamped `LaneEvent`s plus held/down masks; the scenes use it instead of `PAD_*`. Dolphin (keyboard): 120 samples/s, gaps 1.0–15.6 ms, 0 lost, all four lanes map correctly, a press is read ~0.6 ms after it was sampled. **Hardware check pending:** the render test's `input` line shows the real-Wii sample rate |
 
 ## M4a — Chart parser + timing engine on the PC (can run in parallel)
 

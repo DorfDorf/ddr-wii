@@ -5,6 +5,7 @@
 #include <math.h>
 #include <ogc/lwp_watchdog.h>
 
+#include "platform/wii/WiiInput.h"
 #include "platform/wii/WiiVideo.h"
 #include "render/ArrowArt.h"
 #include "render/Font.h"
@@ -44,8 +45,9 @@ u32 lerpColour(u32 a, u32 b, float t) {
 
 constexpr int RenderTest::kStepSprites[RenderTest::kSteps];
 
-RenderTest::RenderTest(wii::Video& video, const render::ArrowArt& art, const render::Font& font)
-    : video_(video), art_(art), font_(font) {
+RenderTest::RenderTest(wii::Video& video, const wii::Input& input, const render::ArrowArt& art,
+                       const render::Font& font)
+    : video_(video), input_(input), art_(art), font_(font) {
     start_ticks_ = gettime();
     step_start_us_ = 0;
 }
@@ -69,8 +71,18 @@ bool RenderTest::frame() {
 }
 
 void RenderTest::handleInput() {
-    held_ = PAD_ButtonsHeld(0);   // main() scans the pads once per frame
-    const u16 down = PAD_ButtonsDown(0);
+    held_ = input_.held(0);   // main() updates input once per frame
+    const u64 now = wii::Input::nowUs();
+    for (int i = 0; i < input_.eventCount(); i++) {
+        const input::LaneEvent& e = input_.event(i);
+        if (!e.pressed) continue;
+        presses_++;
+        last_lane_ = e.lane;
+        last_port_ = e.port;
+        last_age_us_ = now > e.time_us ? (u32)(now - e.time_us) : 0;
+        if (last_age_us_ > max_age_us_) max_age_us_ = last_age_us_;
+    }
+    const u16 down = input_.down(0);
     if (down & PAD_BUTTON_A) auto_ = !auto_;
     int manual = 0;
     if (down & PAD_TRIGGER_R) manual = 1;
@@ -162,17 +174,33 @@ void RenderTest::drawOverlay() {
     const u32 white = 0xFFFFFFFF, grey = 0xB0B0B0FF, warn = 0xFFC040FF;
     GRRLIB_SetAntiAliasing(false);   // crisp, non-bleeding glyphs
 
-    GRRLIB_Rectangle(0, 384, 640, 96, 0x000000B0, true);
-    font_.print(16, 390, white, 1, "ddr-wii M2 render test   %s   %ux%u", video_.modeName(),
+    // Kept above y = 462: the owner's TV overscan cuts off the bottom two text rows.
+    GRRLIB_Rectangle(0, 348, 640, 132, 0x000000B0, true);
+    font_.print(16, 354, white, 1, "ddr-wii M2 render test   %s   %ux%u", video_.modeName(),
                 (unsigned)video_.width(), (unsigned)video_.height());
     const float fps = s.avg_interval_us ? 1e6f / s.avg_interval_us : 0.0f;
-    font_.print(16, 408, s.max_interval_us > video_.refreshPeriodUs() * 3 / 2 ? warn : white, 1,
+    font_.print(16, 372, s.max_interval_us > video_.refreshPeriodUs() * 3 / 2 ? warn : white, 1,
                 "%5.2f fps  frame avg %5.2f max %5.2f ms  busy avg %5.2f max %5.2f ms", fps,
                 s.avg_interval_us / 1000.0f, s.max_interval_us / 1000.0f, s.avg_busy_us / 1000.0f,
                 s.max_busy_us / 1000.0f);
-    font_.print(16, 426, s.dropped_total ? warn : white, 1, "dropped %lu   stress sprites %d (%s)",
+    font_.print(16, 390, s.dropped_total ? warn : white, 1, "dropped %lu   stress sprites %d (%s)",
                 (unsigned long)s.dropped_total, kStepSprites[step_], auto_ ? "auto" : "manual");
-    font_.print(16, 448, grey, 1, "A auto   L/R fewer/more sprites   B 2P/4P test   START+Z 2s exit");
+    const wii::Input::Stats& in = input_.stats();
+    font_.print(16, 408, in.fallback ? warn : white, 1,
+                "input %lu/s  gap %4.1f-%4.1f ms  %s  lost %lu  ports %c%c%c%c",
+                (unsigned long)in.samples_per_sec, in.interval_min_us / 1000.0f,
+                in.interval_max_us / 1000.0f, in.fallback ? "FALLBACK 1/frame" : "SI poll irq",
+                (unsigned long)in.overflows, (input_.connected() & 1) ? '1' : '-',
+                (input_.connected() & 2) ? '2' : '-', (input_.connected() & 4) ? '3' : '-',
+                (input_.connected() & 8) ? '4' : '-');
+    static const char kLaneName[4] = {'L', 'D', 'U', 'R'};
+    if (last_lane_ >= 0)
+        font_.print(16, 426, white, 1, "presses %lu  last P%d %c sampled %4.1f ms before frame (max %4.1f)",
+                    (unsigned long)presses_, last_port_ + 1, kLaneName[last_lane_],
+                    last_age_us_ / 1000.0f, max_age_us_ / 1000.0f);
+    else
+        font_.print(16, 426, grey, 1, "presses 0  (step on a panel)");
+    font_.print(16, 444, grey, 1, "A auto   L/R fewer/more sprites   B 2P/4P test   START+Z 2s exit");
 
     // Stress table, top right.
     GRRLIB_Rectangle(456, 8, 176, 18 * (kSteps + 1) + 8, 0x000000B0, true);
