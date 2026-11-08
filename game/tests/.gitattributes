@@ -1,0 +1,8 @@
+# Corpus files are test inputs: keep their exact bytes (09_odd_whitespace.sm
+# must stay CRLF, others LF).
+corpus/** -text
+# Oracle dumps and scripts: always LF.
+expected/** text eol=lf
+*.sh        text eol=lf
+*.py        text eol=lf
+Makefile    text eol=lf

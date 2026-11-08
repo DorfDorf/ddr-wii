@@ -1,0 +1,2 @@
+Copied from https://github.com/garcia/simfile (testdata/, commit 21e40d97e865dd00358a9ead27550c5fd4d21c96).
+MIT licence: see LICENSE.md in this folder. Used as test input for game/tests.
