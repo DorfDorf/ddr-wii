@@ -2,8 +2,9 @@
 // Gameplay - Milestone M4c scene: plays one song from the SD card with scrolling arrows,
 // judged steps, combo and score (doc 06 §3.2, §3.4, §11.1).
 //
-// For now the song is the generated test song (tools/make-test-song.py, staged by
-// tools/stage-sd.sh). Music plays through wii::AudioStream; SongClock follows ASND's
+// Songs come from the song library (core/songs/SongLibrary, sd:/ddrwii/songs/<pack>/<song>/),
+// scanned once at start; L/R on port 1 pick the song until song select exists (M5 step 2).
+// It starts on the generated test song (tools/make-test-song.py) if it's there. Music plays through wii::AudioStream; SongClock follows ASND's
 // mixing tick as in the M4b test. Notes scroll by beat. Each player has their own chart,
 // Judge and autoplay switch and is bound to a pad port. P2 joins on the ready screen;
 // the results show every player side by side.
@@ -16,6 +17,7 @@
 
 #include "core/chart/Chart.h"
 #include "core/game/Judge.h"
+#include "core/songs/SongLibrary.h"
 #include "core/timing/SongClock.h"
 #include "platform/wii/WiiAudio.h"
 
@@ -54,6 +56,7 @@ private:
         game::Grade lane_flash[game::Judge::kMaxLanes] = {};
     };
 
+    void scanLibrary();
     void loadSong();
     void start();
     void stop(State next);
@@ -74,7 +77,13 @@ private:
 
     State state_ = State::Error;
     std::string error_;
+    ddr::SongLibrary library_;
+    struct SongRef { int pack, song; };
+    std::vector<SongRef> songs_;   // every library song, in library order
+    int song_index_ = 0;
+    u64 scan_us_ = 0;
     std::string song_dir_;
+    std::string music_;        // file name in song_dir_
     ddr::Song song_;
     std::vector<int> charts_;   // dance-single charts in song_.charts
     std::vector<Player> players_;

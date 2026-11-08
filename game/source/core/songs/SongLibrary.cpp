@@ -1,0 +1,211 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// ddr-wii -- a StepMania-style rhythm game for Wii homebrew.
+// Copyright (C) 2026 ddr-wii contributors
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version. See the LICENSE file in the repository root.
+//
+// Song library scan. Original to ddr-wii; the layout rules follow ITGmania's
+// SongManager (groups are folders in Songs/, songs are folders in a group),
+// re-implemented, not ported.
+
+#include "SongLibrary.h"
+
+#include <dirent.h>
+#include <sys/stat.h>
+
+#include <algorithm>
+#include <cctype>
+#include <tuple>
+
+#include "../chart/SmLoader.h"
+#include "../chart/StringUtil.h"
+
+namespace ddr {
+
+namespace {
+
+std::string Lower(std::string s) {
+  for (char& c : s) c = (char)std::tolower((unsigned char)c);
+  return s;
+}
+
+bool HasExt(const std::string& name, const char* ext) {
+  const std::string e = ext;
+  return name.size() > e.size() && Lower(name.substr(name.size() - e.size())) == e;
+}
+
+bool IsAudio(const std::string& f) {
+  return HasExt(f, ".ogg") || HasExt(f, ".mp3") || HasExt(f, ".wav");
+}
+
+bool IsImage(const std::string& f) {
+  return HasExt(f, ".png") || HasExt(f, ".jpg") || HasExt(f, ".jpeg");
+}
+
+/** The file in files that equals name, ignoring case ("" if none). Simfiles
+ *  often get the case of their #MUSIC wrong, and FAT doesn't care. */
+std::string FindNoCase(const std::vector<std::string>& files, const std::string& name) {
+  if (name.empty()) return std::string();
+  const std::string want = Lower(name);
+  for (const std::string& f : files)
+    if (Lower(f) == want) return f;
+  return std::string();
+}
+
+std::string PickMusic(const Song& song, const std::vector<std::string>& files) {
+  std::string m = FindNoCase(files, song.music);
+  if (!m.empty() && IsAudio(m)) return m;
+  for (const std::string& f : files)
+    if (IsAudio(f)) return f;
+  return std::string();
+}
+
+std::string PickBanner(const Song& song, const std::vector<std::string>& files) {
+  std::string b = FindNoCase(files, song.banner);
+  if (!b.empty() && IsImage(b)) return b;
+  // No (valid) #BANNER: a file named like "bn.png", "song-bn.png" or "banner.png".
+  for (const std::string& f : files) {
+    if (!IsImage(f)) continue;
+    std::string stem = Lower(f.substr(0, f.rfind('.')));
+    if (stem.find("banner") != std::string::npos) return f;
+    if (stem.size() >= 2 && stem.compare(stem.size() - 2, 2, "bn") == 0) return f;
+  }
+  return std::string();
+}
+
+std::string SortKey(const std::string& s) { return Lower(Trimmed(s)); }
+
+std::string WithSlash(std::string s) {
+  if (!s.empty() && s.back() != '/') s += '/';
+  return s;
+}
+
+}  // namespace
+
+size_t SongLibrary::SongCount() const {
+  size_t n = 0;
+  for (const PackEntry& p : packs) n += p.songs.size();
+  return n;
+}
+
+bool ListFolder(const std::string& dir, std::vector<std::string>& folders,
+                std::vector<std::string>& files) {
+  folders.clear();
+  files.clear();
+  DIR* d = opendir(dir.c_str());
+  if (d == nullptr) return false;
+  const std::string base = WithSlash(dir);
+  while (struct dirent* e = readdir(d)) {
+    const std::string name = e->d_name;
+    if (name.empty() || name == "." || name == "..") continue;
+    bool isDir = false;
+#ifdef DT_DIR
+    if (e->d_type == DT_DIR) {
+      isDir = true;
+    } else if (e->d_type == DT_UNKNOWN) {
+      struct stat st;
+      isDir = stat((base + name).c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+    }
+#else
+    struct stat st;
+    isDir = stat((base + name).c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+#endif
+    (isDir ? folders : files).push_back(name);
+  }
+  closedir(d);
+  std::sort(folders.begin(), folders.end());
+  std::sort(files.begin(), files.end());
+  return true;
+}
+
+bool ScanSongLibrary(const std::string& rootIn, SongLibrary& out, DefaultSyncOffset def) {
+  out = SongLibrary();
+  const std::string root = WithSlash(rootIn);
+  std::vector<std::string> packFolders, rootFiles;
+  if (!ListFolder(root, packFolders, rootFiles)) return false;
+
+  std::vector<std::string> songFolders, packFiles, folders, files;
+  for (const std::string& packName : packFolders) {
+    PackEntry pack;
+    pack.dir = root + packName + "/";
+    if (!ListFolder(pack.dir, songFolders, packFiles)) continue;
+    // Pack.ini, whatever its case (LoadPackInfo reads it by path).
+    const std::string ini = FindNoCase(packFiles, "Pack.ini");
+    std::string iniText;
+    if (!ini.empty() && ReadFileToString(pack.dir + ini, iniText))
+      pack.info = ParsePackIni(packName, &iniText, def);
+    else
+      pack.info = ParsePackIni(packName, nullptr, def);
+
+    for (const std::string& songName : songFolders) {
+      const std::string where = packName + "/" + songName;
+      SongEntry s;
+      s.dir = pack.dir + songName + "/";
+      s.folder = songName;
+      if (!ListFolder(s.dir, folders, files)) continue;
+      s.simfile = PickSimfile(files);
+      if (s.simfile.empty()) {
+        out.warnings.push_back(where + ": no .ssc or .sm");
+        continue;
+      }
+      Song song;
+      if (!LoadSongFile(s.SimfilePath(), song)) {
+        out.warnings.push_back(where + ": " + s.simfile + " has no charts");
+        continue;
+      }
+      for (size_t i = 0; i < song.charts.size(); i++) {
+        const Chart& c = song.charts[i];
+        if (c.stepsType != "dance-single" || c.notes.empty()) continue;
+        ChartInfo ci;
+        ci.index = (int)i;
+        ci.difficulty = c.difficulty;
+        ci.meter = c.meter;
+        ci.description = c.description;
+        s.charts.push_back(ci);
+      }
+      if (s.charts.empty()) {
+        out.warnings.push_back(where + ": no dance-single charts");
+        continue;
+      }
+      std::stable_sort(s.charts.begin(), s.charts.end(), [](const ChartInfo& a, const ChartInfo& b) {
+        return std::make_tuple((int)a.difficulty, a.meter) < std::make_tuple((int)b.difficulty, b.meter);
+      });
+      s.music = PickMusic(song, files);
+      if (s.music.empty()) {
+        out.warnings.push_back(where + ": no audio file");
+        continue;
+      }
+      s.banner = PickBanner(song, files);
+      s.title = song.title.empty() ? songName : song.title;
+      s.subtitle = song.subtitle;
+      s.artist = song.artist;
+      s.titleTranslit = song.titleTranslit;
+      s.subtitleTranslit = song.subtitleTranslit;
+      s.sampleStart = song.sampleStart;
+      s.sampleLength = song.sampleLength;
+      pack.songs.push_back(std::move(s));
+    }
+    if (pack.songs.empty()) continue;
+
+    std::sort(pack.songs.begin(), pack.songs.end(), [](const SongEntry& a, const SongEntry& b) {
+      auto key = [](const SongEntry& s) {
+        return std::make_tuple(SortKey(s.titleTranslit.empty() ? s.title : s.titleTranslit),
+                               SortKey(s.subtitleTranslit.empty() ? s.subtitle : s.subtitleTranslit),
+                               Lower(s.folder));
+      };
+      return key(a) < key(b);
+    });
+    out.packs.push_back(std::move(pack));
+  }
+  std::sort(out.packs.begin(), out.packs.end(), [](const PackEntry& a, const PackEntry& b) {
+    return std::make_tuple(SortKey(a.info.sortTitle), Lower(a.info.groupName)) <
+           std::make_tuple(SortKey(b.info.sortTitle), Lower(b.info.groupName));
+  });
+  return true;
+}
+
+}  // namespace ddr

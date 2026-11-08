@@ -39,6 +39,7 @@
 #include "../source/core/audio/WavFile.h"
 #include "../source/core/timing/SongClock.h"
 #include "../source/core/game/Judge.h"
+#include "../source/core/songs/SongLibrary.h"
 
 using namespace ddr;
 
@@ -1001,6 +1002,56 @@ static void TestTestSong(const std::string& dir) {
   CHECK(holds == 32);   // 16 per chart in Easy and Medium
 }
 
+// ---------------------------------------------------------------------------
+// Song library scan on the fake tree in library/ (doc 05 M5 step 1)
+
+static void TestSongLibrary(const std::string& dir) {
+  std::printf("[unit] song library\n");
+  SongLibrary lib;
+  CHECK(!ScanSongLibrary(dir + "/library-does-not-exist", lib));
+  CHECK(ScanSongLibrary(dir + "/library", lib));
+  CHECK(lib.packs.size() == 2);   // "Only Broken" has nothing playable
+  CHECK(lib.SongCount() == 3);
+  CHECK(lib.warnings.size() == 5);  // Empty, NoAudio, NoSingle, Sub, Only Broken/Bad
+  if (lib.packs.size() != 2 || lib.SongCount() != 3) return;
+
+  const PackEntry& b = lib.packs[0];  // Pack.ini SortTitle "0 first" puts it first
+  CHECK(b.info.groupName == "B Pack");
+  CHECK(b.info.displayTitle == "Bee Pack");
+  CHECK(b.info.hasPackIni);
+  CHECK_NEAR(b.info.syncOffset, -0.009, 1e-12);
+  CHECK(b.songs.size() == 2);
+  if (b.songs.size() == 2) {
+    const SongEntry& alpha = b.songs[0];
+    CHECK(alpha.simfile == "alpha.ssc");   // .ssc before .sm
+    CHECK(alpha.title == "alpha");
+    CHECK(alpha.subtitle == "ssc wins");
+    CHECK(alpha.music == "music.mp3");     // no #MUSIC: the first audio file
+    CHECK(alpha.banner == "banner.jpg");   // #BANNER file is missing: guessed
+    CHECK(alpha.charts.size() == 2);       // dance-double left out
+    if (alpha.charts.size() == 2) {
+      CHECK(alpha.charts[0].difficulty == Difficulty::Easy && alpha.charts[0].meter == 4);
+      CHECK(alpha.charts[0].index == 2);
+      CHECK(alpha.charts[1].difficulty == Difficulty::Hard && alpha.charts[1].index == 0);
+    }
+    const SongEntry& zeta = b.songs[1];
+    CHECK(zeta.title == "Zeta");
+    CHECK(zeta.music == "ZETA.OGG");       // #MUSIC matched ignoring case
+    CHECK(zeta.banner == "zeta-bn.png");
+    CHECK(zeta.SimfilePath() == dir + "/library/B Pack/Zeta/zeta.sm");
+    CHECK(zeta.MusicPath() == dir + "/library/B Pack/Zeta/ZETA.OGG");
+  }
+  const PackEntry& a = lib.packs[1];
+  CHECK(a.info.groupName == "a pack" && !a.info.hasPackIni);
+  CHECK_NEAR(a.info.syncOffset, 0.0, 1e-12);
+  CHECK(a.songs.size() == 1 && a.songs[0].title == "beta" && a.songs[0].music == "song.wav");
+
+  SongLibrary itg;
+  ScanSongLibrary(dir + "/library", itg, DefaultSyncOffset::ITG);
+  CHECK(itg.packs.size() == 2 && itg.packs.size() > 1 &&
+        std::fabs(itg.packs[1].info.syncOffset + 0.009) < 1e-12);
+}
+
 int main(int argc, char** argv) {
   std::string dir = ".";
   int fuzzIterations = 3000;
@@ -1025,6 +1076,7 @@ int main(int argc, char** argv) {
   TestJudge();
   TestAutoplayCorpus(dir);
   TestTestSong(dir);
+  TestSongLibrary(dir);
   RunFuzz(dir, fuzzIterations);
 
   std::printf("\n%d checks, %d failures%s\n", g_checks, g_failures,
