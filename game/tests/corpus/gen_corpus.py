@@ -5,13 +5,13 @@
 # The files are committed; rerun this only to change them, then regenerate the
 # oracle dumps with `py tools/simfile-oracle.py --regen`.
 #
-# Every file here must be one where StepMania and the `simfile` oracle agree.
+# Every file here must be one where ITGmania v1.3.0 and the `simfile` oracle agree.
 # Known differences we steer around (see game/tests/README.md):
 #   - full-line comments or blank lines *inside* a measure (simfile counts them
-#     as rows; StepMania skips them),
-#   - ",," (StepMania merges empty measures),
-#   - negative BPMs/stops in .sm (StepMania turns them into warps),
-#   - duplicate stops on one beat (StepMania keeps the last, simfile adds them),
+#     as rows; ITGmania skips them),
+#   - ",," (ITGmania merges empty measures),
+#   - negative BPMs/stops in .sm (ITGmania turns them into warps),
+#   - duplicate stops on one beat (ITGmania keeps the last, simfile adds them),
 #   - split-timing charts without their own #OFFSET or #BPMS,
 #   - holds without tails / tails without heads.
 

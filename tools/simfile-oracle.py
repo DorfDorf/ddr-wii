@@ -16,15 +16,15 @@
 # Output format (tab-separated, one note per line, '#' lines are comments):
 #   chart  row  column  type  time
 # chart  index of the chart in file order
-# row    note row, beat * 48, rounded to the nearest row like StepMania does
+# row    note row, beat * 48, rounded to the nearest row like ITGmania does
 # column 0-based
 # type   the .sm note character: 1 2 3 4 M L F K
 # time   seconds, repr() of a Python float
 #
-# Notes on matching StepMania (see game/tests/README.md for the full list):
-#  - Beats are rounded to 1/48 before timing, as StepMania stores note rows.
+# Notes on matching ITGmania v1.3.0 (see game/tests/README.md for the full list):
+#  - Beats are rounded to 1/48 before timing, as ITGmania stores note rows.
 #  - Unhittable notes (inside warps) are kept (UnhittableNotes.KEEP_NOTE).
-#  - Unmatched hold heads/tails are dropped the way StepMania drops them
+#  - Unmatched hold heads/tails are dropped the way ITGmania drops them
 #    (simfile keeps them); see stepmania_hold_filter().
 
 import argparse
@@ -55,7 +55,7 @@ def note_row(beat: Fraction) -> int:
 
 
 def stepmania_hold_filter(notes):
-    """Drop the hold parts StepMania drops (NoteDataUtil::LoadFromSMNoteData):
+    """Drop the hold parts ITGmania drops (NoteDataUtil::LoadFromSMNoteData):
     a '3' only closes the nearest note above it in its column if that note is
     an open '2'/'4' head ('K' is skipped over); unmatched '3's are ignored and
     heads that never get a tail are removed. simfile keeps both."""

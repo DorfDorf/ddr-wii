@@ -81,14 +81,14 @@ py -m pip install simfile "setuptools<81"   # simfile 2.1 still imports pkg_reso
 py tools/simfile-oracle.py --regen
 ```
 
-## Where `simfile` and StepMania differ
+## Where `simfile` and ITGmania differ
 
-We follow StepMania (ITGmania v1.3.0). The oracle is used for note *times*, so
-the corpus avoids these cases, or the oracle mirrors StepMania's rule:
+We follow ITGmania v1.3.0, the code we ported. The oracle is used for note *times*, so
+the corpus avoids these cases, or the oracle mirrors ITGmania's rule:
 
-| Case | StepMania / ddr-wii | `simfile` | Handling |
+| Case | ITGmania v1.3.0 / ddr-wii | `simfile` | Handling |
 |---|---|---|---|
-| Unmatched hold head / tail | head dropped / tail ignored | kept | the oracle applies StepMania's rule |
+| Unmatched hold head / tail | head dropped / tail ignored | kept | the oracle applies ITGmania's rule |
 | Full-line comment or blank line inside a measure | skipped | counted as a row | avoided in corpus |
 | `,,` | one measure break | an empty measure | avoided; unit-tested |
 | Negative BPM/stop in `.sm` | becomes a warp | negative time | unit-tested by hand |

@@ -266,7 +266,7 @@ static void TestTimingBasics() {
   CHECK_NEAR(td.GetBPMAtBeat(5), 60, 1e-9);
 
   // Inverse over a range. GetElapsedTimeFromBeat rounds the beat to a row
-  // (as StepMania does), so use row-aligned beats.
+  // (as ITGmania does), so use row-aligned beats.
   CHECK_NEAR(td.GetElapsedTimeFromBeat(1.0 + 0.4 / 48), td.GetElapsedTimeFromBeat(1.0), 1e-12);
   for (double b = -4; b < 20; b += 17.0 / 48)
     CHECK_NEAR(td.GetBeatFromElapsedTime(td.GetElapsedTimeFromBeat(b)), b, 1e-9);
@@ -422,7 +422,7 @@ static void TestNoteParsing() {
     CHECK(k[0].keysound == 12);
     CHECK(k[1].row == 128 && k[1].lane == 1);
   }
-  // ",,," is one measure break, as in StepMania.
+  // ",,," is one measure break, as in ITGmania.
   std::vector<Note> c = ParseNoteData("1000\n,,,\n1000\n", 4);
   CHECK(c.size() == 2 && c[1].row == 192);
   // Routine charts: players separated by '&'.

@@ -6,7 +6,7 @@ A four-panel rhythm game (StepMania-style) for Nintendo Wii homebrew, played wit
 
 ## Plan in one paragraph
 
-A new lightweight Wii-native engine built with devkitPPC + libogc + GRRLIB. Audio streams through ASND, and the audio sample clock is the master song clock. The `.sm`/`.ssc` parser and timing engine are ported from StepMania 3.9's MIT-licensed code, and the dance mat is read through libogc's `PAD_*` API as a standard GameCube controller.
+A new lightweight Wii-native engine built with devkitPPC + libogc + GRRLIB. Audio streams through ASND, and the audio sample clock is the master song clock. The `.sm`/`.ssc` parser and timing engine are ported from ITGmania v1.3.0 (GPLv3, like this project), and the dance mat is read through libogc's `PAD_*` API as a standard GameCube controller.
 
 ## Docs
 
@@ -29,7 +29,7 @@ A new lightweight Wii-native engine built with devkitPPC + libogc + GRRLIB. Audi
 game/tests/run-tests.sh
 ```
 
-On Windows this needs `g++` in devkitPro's MSYS2 (one-time: `pacman -S gcc` in the devkitPro MSYS2 shell). The script works from Git Bash. See [game/tests/README.md](game/tests/README.md) for the corpus, the oracle (`tools/simfile-oracle.py`) and the known `simfile`/StepMania differences.
+On Windows this needs `g++` in devkitPro's MSYS2 (one-time: `pacman -S gcc` in the devkitPro MSYS2 shell). The script works from Git Bash. See [game/tests/README.md](game/tests/README.md) for the corpus, the oracle (`tools/simfile-oracle.py`) and the known differences between `simfile` and ITGmania.
 
 ## Reference material
 
