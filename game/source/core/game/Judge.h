@@ -18,8 +18,9 @@
 //   - Rolls: the head is a tap. Once it's hit, the lane must be pressed again at least every
 //     roll_ok seconds until the tail (holding it down doesn't count), as in ITG.
 //   - Mines: hit when the lane is down as the mine passes, or pressed within the mine window
-//     of it, as in StepMania; otherwise avoided. They don't affect combo or dance points
-//     (yet); the life meter takes them from the kMine events.
+//     of it, as in StepMania; otherwise avoided. A hit mine costs dance points but not the
+//     combo; the life meter takes them from the kMine events.
+//   - Dance points use ITG's weights (Simply Love ITG mode, doc 06 §7).
 //   - Only judgable notes (not in warps or #FAKES) are judged. Lifts, fakes and keysounds
 //     are ignored.
 // Portable C++17, no libogc: tested on the PC (game/tests).
@@ -70,7 +71,9 @@ struct Score {
   double offset_sum = 0;       // seconds, negative = early
   double offset_sq_sum = 0;
 
-  // Dance points as a percentage of the whole chart (doc 06 §7).
+  // Dance points as a percentage of the whole chart, clamped to 0-100 and truncated to
+  // 0.01% as ITG shows it (doc 06 §7). percentX100: 9873 = 98.73%.
+  int percentX100() const;
   double percent() const;
   double meanOffset() const { return hits ? offset_sum / hits : 0; }
   double offsetStdDev() const;

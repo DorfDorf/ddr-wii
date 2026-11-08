@@ -413,6 +413,20 @@ void SongSelect::drawPane(int slot, const ddr::SongEntry* s) {
     font_.print(x + 8, y + 30, kBlack, 1, "Steps %4d  Holds %3d", c->steps, c->holds);
     font_.print(x + 8, y + 48, kBlack, 1, "Jumps %4d  Mines %3d", c->jumps, c->mines);
     font_.print(x + 8, y + 66, kBlack, 1, "Rolls %4d  Speed %.2fx", c->rolls, p.speed);
+
+    // The machine best for this chart in the current play mode (doc 06 §7), on the right.
+    const game::HighScoreEntry* best =
+        session_.scores.find(game::ChartKey(session_.config.playMode, *s, *c));
+    if (best) {
+        std::snprintf(buf, sizeof buf, "%.2f%%", best->best.percent_x100 / 100.0);
+    } else {
+        std::snprintf(buf, sizeof buf, "--");
+    }
+    font_.print(x + kPaneW - 8 - std::strlen(buf) * kGlyph, y + 30, kBlack, 1, "%s", buf);
+    if (best) {
+        const char* g = game::GradeTierName(best->best.tier());
+        font_.print(x + kPaneW - 8 - std::strlen(g) * kGlyph, y + 48, kBlack, 1, "%s", g);
+    }
 }
 
 // The music wheel: pack headers (grey) and the open pack's songs (dark), cursor row in the

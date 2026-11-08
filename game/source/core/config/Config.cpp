@@ -100,8 +100,11 @@ bool LoadConfig(const std::string& path, Config& out) {
 }
 
 bool SaveConfig(const std::string& path, const Config& c) {
+  return WriteFileAtomic(path, WriteConfigText(c));
+}
+
+bool WriteFileAtomic(const std::string& path, const std::string& text) {
   const std::string tmp = path + ".tmp";
-  const std::string text = WriteConfigText(c);
   FILE* f = std::fopen(tmp.c_str(), "wb");
   if (!f) return false;
   const bool wrote = std::fwrite(text.data(), 1, text.size(), f) == text.size();

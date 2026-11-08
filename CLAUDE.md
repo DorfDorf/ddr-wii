@@ -45,6 +45,7 @@ Run the PC tests before committing changes to `game/source/core/`, and build the
 - Menus follow ITGmania's Simply Love theme (GPLv3) for layout, colours and controls, redrawn with our own placeholder graphics; no theme files are copied (doc 06 §7).
 - Settings live in `sd:/ddrwii/config.ini` (offsets in ms), written whole to a temp file and renamed (doc 06 §7). The global offset is set on the calibration screen (doc 06 §3.5).
 - Two play modes, chosen before song select: Casual (no life bar, no fail) and Competitive (ITG's life bar and failing, ported from ITGmania's `LifeMeterBar`) (doc 06 §3.4, §7).
+- Scoring is ITG's: dance points with Simply Love's ITG weights and its 17 grade tiers. Machine bests per chart and play mode live in `sd:/ddrwii/scores.txt` (doc 06 §7).
 - 2 players now, 4 after M6 (doc 06 §11). Playfields stay inside the TV's safe area (doc 06 §11.3).
 
 ## Docs

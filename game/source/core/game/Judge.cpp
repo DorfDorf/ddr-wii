@@ -7,11 +7,13 @@
 namespace game {
 namespace {
 
-// Dance points (doc 06 §7): Marvelous/Perfect full, Great half, the rest nothing; a held
-// hold full.
-constexpr int kRowPoints[kNumGrades] = {0, 2, 2, 1, 0, 0, 0};
-constexpr int kMaxRowPoints = 2;
-constexpr int kHoldPoints = 2;
+// Dance points with ITG's weights (Simply Love's ITG mode, Scripts/SL_Init.lua, doc 06 §7):
+// per row W1 5, W2 4, W3 2, W4 0, W5 -6, Miss -12; a held hold or roll 5, let go 0; a hit
+// mine -6. The most a chart can give is 5 per row and 5 per hold or roll.
+constexpr int kRowPoints[kNumGrades] = {0, 5, 4, 2, 0, -6, -12};
+constexpr int kMaxRowPoints = 5;
+constexpr int kHoldPoints = 5;
+constexpr int kMinePoints = -6;
 
 bool IsJudged(const ddr::Note& n) {
   return n.judgable && (n.type == ddr::NoteType::Tap || n.IsHold());
@@ -40,9 +42,13 @@ Grade GradeForError(double e, const Windows& w) {
   return Grade::None;
 }
 
-double Score::percent() const {
-  return possible_points > 0 ? 100.0 * std::max(dance_points, 0) / possible_points : 0;
+int Score::percentX100() const {
+  if (possible_points <= 0) return 0;
+  const long long dp = std::min(std::max(dance_points, 0), possible_points);
+  return static_cast<int>(dp * 10000 / possible_points);   // truncated, so 99.999% isn't 100%
 }
+
+double Score::percent() const { return percentX100() / 100.0; }
 
 double Score::offsetStdDev() const {
   if (hits < 2) return 0;
@@ -279,6 +285,7 @@ void Judge::hitMine(int k) {
   MineState& m = mines_[k];
   m.state = MineState::kHit;
   score_.mines_hit++;
+  score_.dance_points += kMinePoints;
   mines_done_++;
   events_.push_back({JudgeEvent::kMine, Grade::None, HoldResult::None, m.lane, m.row, 0});
 }

@@ -10,6 +10,8 @@
 // Competitive mode adds ITG's life bar (core/game/LifeMeter): a player whose bar empties fails,
 // their playfield greys out and stops judging, and the song ends once everyone has failed
 // (doc 06 §11.4). START stops the song; A/START on the results goes back to song select.
+// A song that plays out (or that everyone failed) records each human player's score in the
+// Session's high-score table; a stopped song and autoplay players record nothing (doc 06 §7).
 #pragma once
 
 #include <gctypes.h>
@@ -32,7 +34,7 @@ namespace screens {
 class Gameplay {
 public:
     Gameplay(wii::Video& video, const wii::Input& input, const render::ArrowArt& art,
-             const render::Font& font, const Session& session);
+             const render::Font& font, Session& session);
 
     // Runs one frame of logic + drawing (does not present). Returns false when done: back to
     // song select, or quit the app if quitApp().
@@ -65,11 +67,17 @@ private:
         u64 note_offset_us = 0;
         u64 lane_flash_us[game::Judge::kMaxLanes] = {};
         game::Grade lane_flash[game::Judge::kMaxLanes] = {};
+        // High score (doc 06 §7).
+        std::string score_key;      // game::ChartKey for this chart and play mode
+        bool had_best = false;      // a best existed before this play
+        game::HighScore prev_best;
+        bool new_best = false;
     };
 
     bool loadSong(const Session& session);
     void start();
     void stop(State next);
+    void finish();              // the song played out: record the scores, then the results
     void layout();
     void handleEvents(double offset_us);
     void drainJudge(Player& p, u64 now_us);
@@ -87,6 +95,8 @@ private:
     State state_ = State::Error;
     bool competitive_ = false;  // life bars and failing
     u64 all_failed_us_ = 0;     // when the last player failed (the song ends shortly after)
+    Session& session_;
+    bool recorded_ = false;     // finish() saved the scores (false: stopped with START)
     std::string error_;
     std::string song_dir_;
     std::string music_;        // file name in song_dir_

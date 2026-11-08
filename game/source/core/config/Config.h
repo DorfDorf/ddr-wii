@@ -62,6 +62,9 @@ bool LoadConfig(const std::string& path, Config& out);
  *  first). */
 bool SaveConfig(const std::string& path, const Config& c);
 
+/** Writes text to path + ".tmp", then renames it over path, as above. */
+bool WriteFileAtomic(const std::string& path, const std::string& text);
+
 }  // namespace ddr
 
 #endif
