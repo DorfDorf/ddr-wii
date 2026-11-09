@@ -29,6 +29,9 @@ constexpr u64 kFailedEndUs = 1500000;   // everyone failed: show it this long, t
 constexpr double kEndPadS = 2.0;        // stay on the playfield after the last note
 constexpr u64 kFlashUs = 150000;        // receptor glow after a hit
 constexpr u64 kGradeShowUs = 900000;    // judgement text
+constexpr u64 kHintUs = 1600000;        // "Press START to continue"
+constexpr u32 kPlayerColour[2] = {0xFF47B3FF, 0xFF5D47FF};   // as on Players and song select
+constexpr u32 kBox = 0x1E282FFF, kDark = 0x0A141BFF, kMenuGrey = 0x9AA4ABFF;
 
 constexpr float kLaneDegrees[4] = {-90.0f, 180.0f, 0.0f, 90.0f};   // art points up
 constexpr u16 kLaneButton[4] = {PAD_BUTTON_LEFT, PAD_BUTTON_DOWN, PAD_BUTTON_UP, PAD_BUTTON_RIGHT};
@@ -104,6 +107,7 @@ bool Gameplay::loadSong(const Session& session) {
         Player p;
         p.port = sp.port;
         p.autoplay = sp.autoplay;
+        p.bot = sp.bot;
         p.input_offset_s = session.config.ports[sp.port].inputOffsetS;
         p.speed = sp.speed;
         p.life_bar = sp.life_bar;
@@ -136,12 +140,13 @@ void Gameplay::start() {
         p.note_offset_us = p.row_grade_us = 0;
         std::fill(std::begin(p.lane_flash_us), std::end(p.lane_flash_us), 0);
         std::fill(std::begin(p.mine_flash_us), std::end(p.mine_flash_us), 0);
-        p.life = game::LifeMeter();
+        p.life = game::LifeMeter(p.life_bar == ddr::LifeBar::On);   // NoFail: FailType Off
         p.failed = false;
         for (const game::Judge::NoteState& n : p.judge.notes()) end_s_ = std::max(end_s_, n.end_time);
         for (const game::Judge::MineState& m : p.judge.mines()) end_s_ = std::max(end_s_, m.time);
     }
     all_failed_us_ = 0;
+    paused_ = false;
     end_s_ += kEndPadS;
 
     stream_.close();
@@ -172,19 +177,77 @@ void Gameplay::finish() {
                                             game::HighScore{s.percentX100(), p.failed, s.max_combo});
         session_.scores_dirty = true;
     }
-    recorded_ = true;
+}
+
+bool Gameplay::startPressed(int port) const {
+    return (input_.down(port) & PAD_BUTTON_START) && !(input_.held(port) & PAD_TRIGGER_Z);
+}
+
+// The music and the song clock stop together: ASND's tick counter for a paused voice stops,
+// and SongClock freezes until the first tick after the resume (doc 06 §4). Nothing is judged
+// while paused, and lane events from the pause are dropped.
+void Gameplay::pause(int by, u64 now_us) {
+    stream_.pause();
+    clock_.pause(now_us);
+    if (clock_.started()) chart_s_ = clock_.now(now_us) / 1e6 + offset_s_;
+    paused_ = true;
+    pause_by_ = by;
+    pause_cursor_ = 0;
+    pause_us_ = now_us;
+    hint_us_ = 0;
+}
+
+void Gameplay::resume(u64 now_us) {
+    stream_.resume();
+    clock_.resume(now_us);
+    paused_ = false;
+    if (all_failed_us_) all_failed_us_ += now_us - pause_us_;   // the 1.5 s wait doesn't run while paused
+    // A lane let go during the pause is released at the paused time, so a hold isn't still
+    // held; a press during the pause is dropped (step again).
+    for (Player& p : players_) {
+        if (p.autoplay || p.failed) continue;
+        const u16 held = input_.held(p.port);
+        for (int lane = 0; lane < 4; lane++)
+            if (p.judge.laneDown(lane) && !(held & kLaneButton[lane])) p.judge.release(lane, chart_s_);
+    }
+}
+
+// Anyone's START continues. Only the player who paused moves the cursor and picks with A;
+// A or B on Continue, and B anywhere, explain how to continue (doc 06 §7).
+Gameplay::PauseAction Gameplay::pauseInput(u64 now_us) {
+    for (const Player& p : players_) {
+        if (!p.bot && startPressed(p.port)) {
+            resume(now_us);
+            return PauseAction::None;
+        }
+    }
+    const u16 d = input_.down(players_[pause_by_].port);
+    if (d & PAD_BUTTON_UP) pause_cursor_ = (pause_cursor_ + 2) % 3;
+    if (d & PAD_BUTTON_DOWN) pause_cursor_ = (pause_cursor_ + 1) % 3;
+    if ((d & PAD_BUTTON_B) || ((d & PAD_BUTTON_A) && pause_cursor_ == 0)) {
+        hint_us_ = now_us;
+    } else if (d & PAD_BUTTON_A) {
+        return pause_cursor_ == 1 ? PauseAction::Restart : PauseAction::Quit;
+    }
+    return PauseAction::None;
 }
 
 bool Gameplay::frame() {
     const u16 held = input_.held(0);
     const u64 now_us = wii::Input::nowUs();
 
-    if (state_ == State::Playing) {
-        bool quit = false;   // START on any joined port (not START+Z, the exit chord)
-        for (const Player& p : players_)
-            quit = quit || ((input_.down(p.port) & PAD_BUTTON_START) && !(input_.held(p.port) & PAD_TRIGGER_Z));
-        if (quit) {
-            stop(State::Done);
+    if (state_ == State::Playing && paused_) {
+        switch (pauseInput(now_us)) {
+            case PauseAction::Quit: return false;   // back to song select, nothing recorded
+            case PauseAction::Restart: start(); break;
+            case PauseAction::None: break;
+        }
+    } else if (state_ == State::Playing) {
+        int by = -1;   // START on a player's pad pauses (bots have no pad)
+        for (size_t i = 0; i < players_.size() && by < 0; i++)
+            if (!players_[i].bot && startPressed(players_[i].port)) by = (int)i;
+        if (by >= 0) {
+            pause(by, now_us);
         } else {
             const wii::AudioStream::TickReport t = stream_.tickReport();
             if (t.count != last_tick_report_) {
@@ -238,6 +301,7 @@ bool Gameplay::frame() {
     GRRLIB_SetAntiAliasing(false);   // the bitmap font is drawn without filtering
     if (state_ == State::Playing) {
         drawHud(chart_s_);
+        if (paused_) drawPause(now_us);
     } else if (state_ == State::Done) {
         drawResults();
     } else {
@@ -281,7 +345,7 @@ void Gameplay::drainJudge(Player& p, u64 now_us) {
     for (const game::JudgeEvent& e : p.judge.events()) {
         if (p.life_bar != ddr::LifeBar::Off && !p.failed) {
             p.life.apply(e);
-            if (p.life.failed() && p.life_bar == ddr::LifeBar::On) {   // no fail: the bar stays
+            if (p.life.failed()) {   // never with no fail: that bar keeps moving
                 p.failed = true;
                 p.failed_us = now_us;
             }
@@ -460,12 +524,45 @@ void Gameplay::drawHud(double chart_s) {
         font_.print(472, y + 64, grey, 1, "sd   %.1f ms", s.offsetStdDev() * 1000);
         if (s.held_misses) font_.print(472, y + 80, warn, 1, "held miss %d", s.held_misses);
     }
+    if (paused_) return;   // the pause menu's help strip goes there
     const wii::AudioStream::Stats st = stream_.stats();
     const u32 dropped = video_.stats().dropped_total;
     font_.print(64, 400, st.underruns ? bad : grey, 1, "%6.2f s  offset %+.0f ms  underruns %lu",
                 chart_s, offset_s_ * 1000, (unsigned long)st.underruns);
-    font_.print(64, 416, dropped ? warn : grey, 1, "%s  dropped %lu  START stop", video_.modeName(),
+    font_.print(64, 416, dropped ? warn : grey, 1, "%s  dropped %lu  START pause", video_.modeName(),
                 (unsigned long)dropped);
+}
+
+// The pause box, as in the menu prototype: the paused player's colour on top, a row per choice
+// with the key that picks it, and the help strip at the bottom.
+void Gameplay::drawPause(u64 now_us) {
+    const u32 white = 0xFFFFFFFF, black = 0x000000FF;
+    const u32 pc = kPlayerColour[pause_by_ & 1];
+    render::rect(0, 0, video_.width(), video_.height(), 0x00000099);
+    render::rect(200, 140, 240, 200, kBox);
+    render::rect(200, 140, 240, 4, pc);
+    printCentred(font_, 320, 156, white, 2, "PAUSED");
+    static const char* const kRows[3][2] = {{"Continue", "START"}, {"Restart", "A"}, {"Quit", "A"}};
+    const float pulse = 0.6f + 0.4f * std::sin(now_us / 1e6f * 6);
+    for (int k = 0; k < 3; k++) {
+        const float y = 196 + k * 40;
+        const bool sel = k == pause_cursor_;
+        render::rect(232, y, 176, 36, sel ? pc : kDark);
+        if (sel) render::rect(228, y, 4, 36, 0xFFFFFF00 | (u32)(255 * pulse));
+        font_.print(248, y + 10, sel ? black : white, 1, "%s", kRows[k][0]);
+        const float kw = std::strlen(kRows[k][1]) * render::Font::kGlyphW;
+        font_.print(392 - kw, y + 10, sel ? black : kMenuGrey, 1, "%s", kRows[k][1]);
+    }
+    char buf[48];
+    std::snprintf(buf, sizeof buf, "paused by P%d", pause_by_ + 1);
+    printCentred(font_, 320, 320, kMenuGrey, 1, buf);
+    font_.print(48, 400, kMenuGrey, 1, "Anyone: START continues");
+    font_.print(48, 416, kMenuGrey, 1, "P%d: Up/Down choose   A restart or quit", pause_by_ + 1);
+    if (hint_us_ && now_us - hint_us_ < kHintUs) {
+        render::rect(112, 440, 416, 28, 0x000000E0);
+        render::rect(112, 440, 4, 28, 0xFFBE00FF);
+        printCentred(font_, 320, 446, white, 1, "Press START to continue");
+    }
 }
 
 // Results (doc 06 §7): one column per player.
@@ -486,8 +583,6 @@ void Gameplay::drawResults() {
         u32 rec_colour = grey;
         if (p.autoplay) {
             std::snprintf(rec, sizeof rec, "autoplay, not saved");
-        } else if (!recorded_) {
-            std::snprintf(rec, sizeof rec, "stopped, not saved");
         } else if (p.new_best && p.had_best) {
             std::snprintf(rec, sizeof rec, "New best! (was %.2f%%)", p.prev_best.percent_x100 / 100.0);
             rec_colour = 0xFFE060FF;

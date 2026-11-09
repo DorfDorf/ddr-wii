@@ -787,6 +787,65 @@ static void TestSongClock() {
   // Free run (the audio has ended): no hold, the CPU clock carries on.
   h.freeRun();
   CHECK(h.now(9100000) == 3000000);
+
+  // Pause (doc 06 §7): one report per 21333 us tick, song time = cpu - 1 s exactly.
+  {
+    const int64_t tk = 21333;
+    timing::SongClock p;
+    for (int k = 0; k <= 100; k++) p.observe(1000000 + k * tk, k * tk);
+    const uint64_t P = 1000000 + 100 * tk + 5000;   // between ticks 100 and 101
+    const int64_t F = 100 * tk + 5000;
+    p.pause(P);
+    CHECK(p.paused() && p.now(P) == F);
+    CHECK(p.now(P + 3000000) == F);               // frozen
+    p.observe(P + 1000000, 101 * tk);              // ASND keeps ticking; the count doesn't move
+    CHECK(p.now(P + 4000000) == F && p.snaps() == 0);
+    const uint64_t R = P + 5000000;
+    p.resume(R);
+    CHECK(!p.paused() && p.now(R) == F);
+    CHECK(std::fabs(p.offsetUs() - ((double)F - (double)R)) < 1);   // lane events map to F
+    p.observe(R - 1000, 101 * tk);                 // mixed before the resume: dropped
+    CHECK(p.now(R + 10000) == F);                  // waits for the audio
+    p.observe(R + 15000, 101 * tk);                // first tick after the resume
+    CHECK(p.now(R + 15000) == 101 * tk);           // at most one tick on from F
+    bool mono = true;
+    int64_t prev = 0;
+    for (int k = 1; k <= 50; k++) {
+      p.observe(R + 15000 + k * tk, (101 + k) * tk);
+      const int64_t v = p.now(R + 15000 + k * tk + 100);
+      if (v < prev) mono = false;
+      prev = v;
+    }
+    CHECK(mono && p.snaps() == 0);
+    CHECK(p.now(R + 15000 + 50 * tk + 100) == 151 * tk + 100);   // no drift from the pause
+
+    // A first report behind the frozen value doesn't send the clock back.
+    const uint64_t P2 = R + 15000 + 50 * tk + 100;
+    p.pause(P2);
+    const int64_t F2 = p.now(P2);
+    p.resume(P2 + 2000000);
+    p.observe(P2 + 2005000, F2 - 15000);
+    CHECK(p.now(P2 + 2005000) == F2);
+    CHECK(p.now(P2 + 2005000 + 20000) == F2 + 5000);
+
+    // Free-running (audio over): resume carries on at once from the frozen value.
+    timing::SongClock f;
+    f.observe(1000000, 0);
+    f.freeRun();
+    f.pause(3000000);
+    CHECK(f.now(9000000) == 2000000);
+    f.resume(9000000);
+    CHECK(f.now(9500000) == 2500000);
+
+    // Paused before the first report: nothing to freeze, the first report after starts it.
+    timing::SongClock s;
+    s.pause(1000);
+    s.observe(2000, 0);
+    CHECK(!s.started());
+    s.resume(3000);
+    s.observe(4000, 0);
+    CHECK(s.started() && s.now(5000) == 1000);
+  }
 }
 
 
@@ -887,6 +946,22 @@ static void TestMinesRollsLife() {
     CHECK(l.failed() && l.life() == 0);
     for (int i = 0; i < 50; i++) l.row(game::Grade::Marvelous);
     CHECK(l.failed() && l.life() == 0);   // stays failed
+  }
+  {  // No fail (ITG's FailType Off): the bar reaches 0, never fails, and keeps moving.
+    game::LifeMeter l(false);
+    for (int i = 0; i < 6; i++) l.row(game::Grade::Miss);   // 0.5 - 5 x 0.1 leaves ~1e-17
+    CHECK(l.empty() && !l.failed() && l.life() == 0);
+    l.row(game::Grade::Miss);              // stays at 0, not below
+    CHECK(l.life() == 0);
+    for (int i = 0; i < 9; i++) l.row(game::Grade::Marvelous);   // regen still waits 10 rows
+    CHECK(l.life() == 0);
+    l.row(game::Grade::Marvelous);
+    CHECK_NEAR(l.life(), 0.008, 1e-12);
+    CHECK(!l.empty() && !l.failed() && l.danger());
+    for (int i = 0; i < 200; i++) l.row(game::Grade::Perfect);
+    CHECK(l.hot() && !l.failed());         // back to full
+    for (int i = 0; i < 12; i++) l.row(game::Grade::Miss);   // empties again: still not failed
+    CHECK(l.empty() && !l.failed());
   }
   {  // Full life: any loss costs at least 10% (harsh hot penalty); regen stacks to 10.
     game::LifeMeter l;

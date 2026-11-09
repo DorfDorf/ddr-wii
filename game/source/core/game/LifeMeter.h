@@ -8,9 +8,10 @@
 // Software Foundation, either version 3 of the License, or (at your option)
 // any later version. See the LICENSE file in the repository root.
 //
-// LifeMeter - ITG's life bar, for a player with the life bar On (doc 06 §3.4; M5 step 4). Port of
-// ITGmania v1.3.0 src/LifeMeterBar.cpp (normal drain only) with the values Simply Love
-// sets for its ITG mode. See LifeMeter.cpp for the notice and what changed.
+// LifeMeter - ITG's life bar, for a player with the life bar On or On, no fail (doc 06 §3.4;
+// M5 step 4, no fail in target menu flow slice 2). Port of ITGmania v1.3.0
+// src/LifeMeterBar.cpp (normal drain only) with the values Simply Love sets for its ITG mode.
+// See LifeMeter.cpp for the notice and what changed.
 
 #ifndef DDR_CORE_GAME_LIFEMETER_H
 #define DDR_CORE_GAME_LIFEMETER_H
@@ -36,7 +37,10 @@ struct LifeSettings {
 
 class LifeMeter {
  public:
-  explicit LifeMeter(const LifeSettings& s = LifeSettings()) : s_(s), life_(s.initial) {}
+  // can_fail false is ITG's FailType Off ("On, no fail"): the bar never fails the player and
+  // keeps moving after it reaches 0.
+  explicit LifeMeter(bool can_fail = true, const LifeSettings& s = LifeSettings())
+      : s_(s), life_(s.initial), can_fail_(can_fail) {}
 
   // Feed every JudgeEvent: rows, holds and mines change life; notes are ignored.
   void apply(const JudgeEvent& e);
@@ -45,7 +49,8 @@ class LifeMeter {
   void mine();
 
   double life() const { return life_; }      // 0..1
-  bool failed() const { return failed_; }    // reached 0; stays failed
+  bool failed() const { return failed_; }    // reached 0 while it can fail; stays failed
+  bool empty() const { return life_ <= 0; }  // ITG's IsFailing (passmark 0), even with no fail
   bool hot() const { return life_ >= s_.hot; }
   bool danger() const { return life_ < s_.danger; }
 
@@ -56,6 +61,7 @@ class LifeMeter {
   double life_;
   int miss_combo_ = 0;
   int combo_to_regain_ = 0;
+  bool can_fail_ = true;
   bool failed_ = false;
 };
 

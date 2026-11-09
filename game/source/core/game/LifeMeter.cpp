@@ -21,6 +21,11 @@
 //  - Settings come from a struct instead of theme metrics and preferences.
 //  - Failing (FailType immediate, passmark 0) is decided here instead of in
 //    ScreenGameplay: life reaching 0 fails the player for good.
+//  - FailType Off (no fail) is a constructor flag: the player is never marked
+//    failed, so the bar keeps moving after it reaches 0, as ITG's does
+//    (ScreenGameplay never sets m_bFailed with FailType_Off, and m_bFailed is
+//    what stops ChangeLife). FailType ImmediateContinue / EndOfSong aren't
+//    ported.
 //  - No drawing, messages or Lua.
 
 #include "LifeMeter.h"
@@ -78,7 +83,7 @@ void LifeMeter::change(double delta) {
   // If we've already failed, there's no point in letting them fill up the bar again.
   if (failed_) return;
   life_ = std::min(1.0, std::max(0.0, life_ + delta));
-  if (life_ <= 0) failed_ = true;
+  if (life_ <= 0 && can_fail_) failed_ = true;
 }
 
 }  // namespace game
