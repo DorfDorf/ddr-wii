@@ -68,7 +68,8 @@ bool Input::init(u32 debounce_us) {
     for (auto& f : filters_) f.setWindow(debounce_us);
     g_head = g_tail = 0;
     g_overflows = g_irq_samples = 0;
-    window_start_tick_ = gettime();
+    window_start_tick_ = last_irq_tick_ = gettime();
+    last_irq_samples_ = 0;
     SI_RegisterPollingHandler(onPoll);
     return true;
 }
@@ -118,7 +119,6 @@ void Input::handleSample(u64 tick, const u16* buttons, u8 ok_mask, u8 missing_ma
 void Input::update() {
     event_count_ = 0;
     for (u16& d : down_) d = 0;
-    updates_++;
 
     u32 missing_all = 0;
     u32 drained = 0;
@@ -132,8 +132,16 @@ void Input::update() {
     }
     g_tail = head;
 
-    // No interrupt samples after half a second: read once per frame instead.
-    stats_.fallback = g_irq_samples == 0 && updates_ > 30;
+    // No interrupt samples for half a second (none at all, or every pad unplugged: the SI poll
+    // stops when no port is enabled, so nothing would re-probe them): read once per frame
+    // instead. PAD_Read also re-arms the probe of a port that came back empty.
+    const u64 now = gettime();
+    const u32 irq_samples = g_irq_samples;
+    if (irq_samples != last_irq_samples_) {
+        last_irq_samples_ = irq_samples;
+        last_irq_tick_ = now;
+    }
+    stats_.fallback = diff_usec(last_irq_tick_, now) >= 500000;
     if (stats_.fallback) {
         PADStatus st[PAD_CHANMAX];
         PAD_Read(st);
@@ -159,7 +167,6 @@ void Input::update() {
     }
 
     // Per-second sample statistics.
-    const u64 now = gettime();
     if (diff_usec(window_start_tick_, now) >= 1000000) {
         stats_.samples_per_sec = window_samples_;
         stats_.interval_min_us = window_samples_ > 1 ? window_min_us_ : 0;

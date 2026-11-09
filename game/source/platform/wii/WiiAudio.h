@@ -42,7 +42,8 @@ public:
         u32 count = 0;           // increments with every report
     };
 
-    // Ensures ASND is running (ASND_Init once per boot).
+    // Ensures ASND is running (ASND_Init once per boot) and reserves the 24 MB song buffer at
+    // the top of MEM2. main() calls it first, before any other thread exists.
     static void initAsnd();
 
     // Opens a .wav, .ogg or .mp3, starts the fill thread and fills the ring. Doesn't play yet.
@@ -87,7 +88,7 @@ private:
     static void* fillThread(void* self);
     static void voiceCallback(s32 voice);
     void fillOnce();
-    void startFill();
+    bool startFill();   // false: the fill thread couldn't be created
     void stopFill();
 
     void* source_ = nullptr;     // Source* (WiiAudio.cpp)
@@ -100,7 +101,7 @@ private:
     u64 decode_us_ = 0;
     u32 start_delay_frames_ = 0;
     bool start_delay_known_ = true;
-    u32 lwp_ = 0;                // lwp_t
+    u32 lwp_ = 0xFFFFFFFF;       // lwp_t; LWP_THREAD_NULL while no fill thread runs
     volatile bool stop_ = false;
     bool playing_ = false;
     bool paused_ = false;

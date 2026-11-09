@@ -511,7 +511,8 @@ void Gameplay::drawPlayer(Player& p, double beat, u64 now_us) {
     }
     std::snprintf(buf, sizeof buf, "%.2f%%", p.judge.score().percent());
     printCentred(font_, p.centre_x, 340, 0xFFFFFFFF, 2, buf);
-    printCentred(font_, p.centre_x, 374, p.autoplay ? 0xFFC040FF : 0xB0B0B0FF, 1, playerLabel(p).c_str());
+    playerLabel(p, buf, sizeof buf);
+    printCentred(font_, p.centre_x, 374, p.autoplay ? 0xFFC040FF : 0xB0B0B0FF, 1, buf);
 }
 
 // ITG-style life bar across the top of the playfield: green, red when in danger, white when
@@ -526,14 +527,14 @@ void Gameplay::drawLife(const Player& p) {
     render::rect(x, kLifeY, (float)(w * life), kLifeH, c);
 }
 
-std::string Gameplay::playerLabel(const Player& p) const {
+// Into buf (n bytes): no std::string, so nothing is allocated per frame (doc 06 §2).
+void Gameplay::playerLabel(const Player& p, char* buf, size_t n) const {
     const ddr::Chart& c = song_.charts[p.chart];
-    char buf[64], port[24];
+    char port[24];
     std::snprintf(port, sizeof port, "port %d", p.port + 1);
-    std::snprintf(buf, sizeof buf, "P%d %s %s %d", (int)(&p - players_.data()) + 1,
+    std::snprintf(buf, n, "P%d %s %s %d", (int)(&p - players_.data()) + 1,
                   p.autoplay ? "AUTO" : port,
                   ddr::DifficultyToString(c.difficulty), c.meter);
-    return buf;
 }
 
 // Text stays in the title-safe area (x 64-576, y 48-432; doc 06 §11.3).

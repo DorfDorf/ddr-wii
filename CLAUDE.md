@@ -56,6 +56,7 @@ Run the PC tests before committing changes to `game/source/core/`, and build the
 - Gameplay puts each run in the top 10 under the port's last name, and scores.txt is written as soon as Gameplay returns; Results only renames the entry, so a name typed but not saved counts. The last name is kept per port in `config.ini` (`[PortN] Name`), not in scores.txt (doc 06 §7).
 - Song select loads banners and plays previews on a worker thread (`screens/SongMedia`). Banners are decoded with libpng/libjpeg, not GRRLIB's loaders. The scan is cached in `sd:/ddrwii/cache.txt` (doc 06 §7).
 - 2 players now, 4 after M6 (doc 06 §11). Playfields stay inside the TV's safe area (doc 06 §11.3).
+- The Reset and Power buttons set a flag that ends the current scene like the exit chord; the pending saves run on the way out, then Reset returns to the loader and Power switches off. The SD mount is retried for 2 s; without a card the title says so once and nothing is saved (doc 06 §8).
 
 ## Docs
 

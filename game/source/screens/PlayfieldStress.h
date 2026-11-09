@@ -7,6 +7,8 @@
 
 #include <gctypes.h>
 
+#include "screens/MenuUi.h"
+
 namespace wii { class Video; class Input; }
 namespace render { struct ArrowArt; class Font; }
 
@@ -51,7 +53,7 @@ private:
 
     u64 start_ticks_ = 0;
     u16 held_ = 0;
-    u32 quit_frames_ = 0;
+    ui::ExitChord exit_;
 
     bool auto_ = true;
     int step_ = 0;   // players - 1

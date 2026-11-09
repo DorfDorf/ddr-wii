@@ -31,6 +31,7 @@ struct SessionPlayer {
 struct Session {
     static constexpr int kMaxPlayers = 2;   // 4 after M6 (doc 06 §11)
 
+    bool sd_mounted = false;                // false: no SD card found at boot; nothing is saved
     ddr::SongLibrary library;
     u64 scan_us = 0;
     bool scanned = false;                   // false: sd:/ddrwii/songs couldn't be opened

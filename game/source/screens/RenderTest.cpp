@@ -9,6 +9,7 @@
 #include "platform/wii/WiiVideo.h"
 #include "render/ArrowArt.h"
 #include "render/Font.h"
+#include "screens/MenuUi.h"
 
 namespace screens {
 namespace {
@@ -65,13 +66,17 @@ bool RenderTest::frame() {
     drawLanes(song_beat);
     drawOverlay();
 
-    // START+Z held for 2 s on port 1 exits.
-    quit_frames_ = ((held_ & PAD_BUTTON_START) && (held_ & PAD_TRIGGER_Z)) ? quit_frames_ + 1 : 0;
-    return quit_frames_ < 120;
+    return !exit_.update(input_);   // START+Z held for 2 s on any pad exits
 }
 
 void RenderTest::handleInput() {
-    held_ = input_.held(0);   // main() updates input once per frame
+    // Any pad; main() updates input once per frame.
+    held_ = 0;
+    u16 down = 0;
+    for (int port = 0; port < wii::Input::kPorts; port++) {
+        held_ |= input_.held(port);
+        down |= input_.down(port);
+    }
     const u64 now = wii::Input::nowUs();
     for (int i = 0; i < input_.eventCount(); i++) {
         const input::LaneEvent& e = input_.event(i);
@@ -82,7 +87,6 @@ void RenderTest::handleInput() {
         last_age_us_ = now > e.time_us ? (u32)(now - e.time_us) : 0;
         if (last_age_us_ > max_age_us_) max_age_us_ = last_age_us_;
     }
-    const u16 down = input_.down(0);
     if (down & PAD_BUTTON_A) auto_ = !auto_;
     int manual = 0;
     if (down & PAD_TRIGGER_R) manual = 1;

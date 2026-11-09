@@ -4,13 +4,15 @@
 // B goes back one level (song select -> Players -> Title). Options and the exit prompt open from
 // the title; the offset calibration opens from Options and with R in song select; the test
 // scenes (M4b audio clock, M2b playfield stress, M2 render) from Options. START+Z held for 2 s
-// exits from anywhere.
+// exits from anywhere, and so do the Wii's Reset and Power buttons (doc 06 §8).
 #include <fat.h>
 #include <gccore.h>
 #include <ogc/lwp_watchdog.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include "platform/wii/MenuSound.h"
+#include "platform/wii/WiiAudio.h"
 #include "platform/wii/WiiInput.h"
 #include "platform/wii/WiiVideo.h"
 #include "render/ArrowArt.h"
@@ -31,24 +33,42 @@ namespace {
 
 constexpr const char* kSongsRoot = "sd:/ddrwii/songs";
 
+// The Wii's Reset and Power buttons. The callbacks run at interrupt level and only set a flag;
+// runScene then ends the scene as if the exit chord had been held, so the pending config.ini
+// and scores.txt writes still happen on the way out (doc 06 §8).
+volatile bool g_reset = false, g_power = false;
+void onReset(u32, void*) { g_reset = true; }
+void onPower() { g_power = true; }
+bool shutdownRequested() { return g_reset || g_power; }
+
+// A button pressed this frame on any pad (every pad works in every menu, CLAUDE.md).
+bool anyDown(const wii::Input& input, u16 buttons) {
+    for (int port = 0; port < wii::Input::kPorts; port++)
+        if (input.down(port) & buttons) return true;
+    return false;
+}
+
 // Runs one scene until it quits (returns false) or, with b_next, B is pressed (returns true).
 template <typename Scene>
 bool runScene(wii::Video& video, wii::Input& input, Scene& scene, bool b_next = true) {
     video.resetStats();
     for (;;) {
+        if (shutdownRequested()) return false;
         video.beginFrame();
         input.update();   // drains the timestamped SI samples; scenes read input from here
-        if (b_next && (input.down(0) & PAD_BUTTON_B)) return true;
+        if (b_next && anyDown(input, PAD_BUTTON_B)) return true;
         const bool running = scene.frame();
         video.endFrame();
         if (!running) return false;
     }
 }
 
-// Writes config.ini if a screen changed it (scroll speeds, life bars).
+// Writes config.ini if a screen changed it (scroll speeds, life bars). Without an SD card
+// there's nowhere to write; the title said so at boot.
 void saveConfigIfChanged(screens::Session& session) {
     if (!session.config_dirty) return;
     session.config_dirty = false;
+    if (!session.sd_mounted) return;
     if (!ddr::SaveConfig(screens::OffsetCalibration::kConfigPath, session.config))
         session.message = "Couldn't write sd:/ddrwii/config.ini";
 }
@@ -61,6 +81,7 @@ constexpr const char* kCachePath = "sd:/ddrwii/cache.txt";
 void saveScoresIfChanged(screens::Session& session) {
     if (!session.scores_dirty) return;
     session.scores_dirty = false;
+    if (!session.sd_mounted) return;
     if (!game::SaveHighScores(kScoresPath, session.scores))
         session.message = "Couldn't write sd:/ddrwii/scores.txt";
 }
@@ -77,10 +98,18 @@ int main(int, char**) {
         return EXIT_FAILURE;
     }
 
-    fatInitDefault();   // SD card (sd:/); song select and the audio test report it if this failed
+    SYS_SetResetCallback(onReset);
+    SYS_SetPowerCallback(onPower);
+    wii::AudioStream::initAsnd();   // ASND and the 24 MB song buffer, before any other thread exists
+
+    // The SD card (sd:/). Some cards need a moment after power-on (doc 06 §8): retry for 2 s.
+    screens::Session session;
+    const u64 sd_start = gettime();
+    while (!(session.sd_mounted = fatInitDefault()) && ticks_to_millisecs(gettime() - sd_start) < 2000)
+        usleep(100000);
+    if (!session.sd_mounted) session.message = "No SD card found: nothing will be saved";
 
     // config.ini first: it sets the pad debounce and the sync of packs without a Pack.ini.
-    screens::Session session;
     session.config_loaded = ddr::LoadConfig(screens::OffsetCalibration::kConfigPath, session.config);
     game::LoadHighScores(kScoresPath, session.scores);   // none yet is fine
     wii::Input input;
@@ -104,6 +133,7 @@ int main(int, char**) {
     int title_row = screens::Title::kPlay;
     bool players_from_title = true;
     for (;;) {
+        if (shutdownRequested()) break;   // Reset or Power: the saves below, then out
         if (scene == Scene::Title) {
             screens::Title::Choice choice;
             {
@@ -221,5 +251,6 @@ int main(int, char**) {
     font.destroy();
     art.destroy();
     video.shutdown();
-    return EXIT_SUCCESS;   // back to the loader (HBC / Dolphin)
+    if (g_power) SYS_ResetSystem(SYS_POWEROFF, 0, 0);   // off, to standby or idle as the console is set
+    return EXIT_SUCCESS;   // back to the loader (HBC / Dolphin); the Reset button too
 }

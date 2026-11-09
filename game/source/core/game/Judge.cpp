@@ -60,6 +60,7 @@ void Judge::load(const std::vector<ddr::Note>& notes, int lanes, const Options& 
   *this = Judge();
   opt_ = opt;
   lanes_ = std::min(std::max(lanes, 0), kMaxLanes);
+  events_.reserve(64);   // Gameplay drains these every frame, so the list never grows mid-song
   for (const ddr::Note& n : notes) {
     if (n.judgable && n.type == ddr::NoteType::Mine && n.lane >= 0 && n.lane < lanes_) {
       MineState m;
