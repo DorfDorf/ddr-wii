@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// SongSelect - choose a song and each player's difficulty (doc 06 §7, §11.2; M5 step 2).
+// SongSelect - choose a song, then each player's settings in the song settings popup
+// (doc 06 §7 target menu flow, §11.2; M5 step 2).
 //
 // The layout follows ITGmania's default theme, Simply Love (GPLv3), in its 4:3 form: banner
 // top left, the song's artist/BPM/length under it, the difficulty grid with meter blocks, one
@@ -7,17 +8,24 @@
 // (packs as folders, the open pack's songs under its header). Re-drawn here with our own
 // placeholder graphics and bitmap font; no theme files are used.
 //
-// Controls, as on a dance mat in ITG: Left/Right move the wheel (held: repeat), Up/Down change
-// that player's difficulty (with A held: their scroll speed), START opens a pack or picks the
-// song, B goes back to the play-mode screen. START on a port that hasn't joined joins it as
-// the next player. Debug: Z toggles that player's autoplay, X leaves,
-// Y on port 1 adds/removes an autoplay player, R on port 1 opens the offset calibration.
+// The players come from the Players screen. Any player moves the wheel: Up/Down (held: repeat
+// after 0.4 s every 75 ms, every 35 ms after 2 s), Right opens a pack, Left closes it, A opens
+// a pack or the song settings popup, B goes back to Players. R on port 1 (controller) opens
+// the offset calibration. START+Z for 2 s exits.
+//
+// The popup has one column per player, each with their own cursor: Difficulty (the song's
+// charts; remembered from song to song), Speed (0.25x-8x, saved per port), Life bar (Off /
+// On / On, no fail; saved per port), Autoplay (a demo, not scored) and Ready. Up/Down pick a
+// row, Left/Right change it, A on another row jumps to Ready, A on Ready readies the player
+// and locks their arrows, A again un-readies. B (anyone) closes it for everyone. The song
+// starts when every player is ready. An autoplay P2 added with Y on Players is always ready.
 #pragma once
 
 #include <gctypes.h>
 
 #include <vector>
 
+#include "core/input/MenuRepeat.h"
 #include "screens/Session.h"
 #include "screens/SongMedia.h"
 
@@ -40,16 +48,21 @@ public:
 
 private:
     struct Item { int pack, song; };   // song -1: the pack's header
+    static constexpr int kRows = 5;    // popup rows: difficulty, speed, life bar, autoplay, ready
 
     void buildItems();
     void moveCursor(int delta);
+    void setPackOpen(int pack, bool open);   // cursor goes to the pack's header
     void pickCharts();                 // each player's chart nearest their preferred difficulty
-    void handleInput();
+    void handleWheel();
+    void openPopup();
+    void handlePopup();
     void draw();
     void drawSongInfo(const ddr::SongEntry* s);
     void drawGrid(const ddr::SongEntry* s);
     void drawPane(int slot, const ddr::SongEntry* s);
     void drawWheel();
+    void drawPopup(const ddr::SongEntry* s);
     void updateMedia();                // ask for the banner and preview once the cursor rests
 
     wii::Video& video_;
@@ -60,13 +73,17 @@ private:
     std::vector<Item> items_;
     int cursor_ = 0;          // into items_
     float scroll_ = 0;        // drawn position, eases towards cursor_
-    int repeat_dir_ = 0;      // held Left/Right
-    u64 repeat_at_us_ = 0;
+    input::MenuRepeat wheel_up_, wheel_down_;
     u32 frames_ = 0;
+    u32 message_frame_ = 0;   // when session_.message was last set
     u32 quit_frames_ = 0;
     bool picked_ = false;
     bool calibrate_ = false;
     bool back_ = false;
+
+    bool popup_ = false;
+    int row_[Session::kMaxPlayers] = {};
+    input::MenuRepeat speed_rep_[Session::kMaxPlayers][2];   // Left, Right on the speed row
 
     struct PaneBest {                  // drawPane's cached high-score lookup, per slot
         int pack = -2, song = -2, chart = -1;

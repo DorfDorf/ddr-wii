@@ -37,7 +37,6 @@ constexpr float kPaneW = 264;
 constexpr float kGlyph = render::Font::kGlyphW;
 
 constexpr double kMinSpeed = 0.25, kMaxSpeed = 8.0, kSpeedStep = 0.25;   // ITG x-mods
-constexpr u64 kRepeatDelayUs = 400000, kRepeatUs = 80000;   // held Left/Right
 
 constexpr const char* kStartFolder = "Click 120";   // the hardware checklist's test song
 
@@ -57,6 +56,14 @@ constexpr u32 kPlayerColour[Session::kMaxPlayers] = {0xFF47B3FF, 0xFF5D47FF};
 
 constexpr u32 kBg = 0x101828FF, kBox = 0x1E282FFF, kDark = 0x0A141BFF, kPackBg = 0x4C565DFF;
 constexpr u32 kWhite = 0xFFFFFFFF, kGrey = 0x9AA4ABFF, kBlack = 0x000000FF;
+
+const char* lifeBarText(ddr::LifeBar b) {
+    switch (b) {
+        case ddr::LifeBar::On: return "life bar on";
+        case ddr::LifeBar::NoFail: return "bar, no fail";
+        default: return "life bar off";
+    }
+}
 
 // Prints at most max_chars characters (cut with "..").
 void printFit(const render::Font& font, float x, float y, u32 colour, float scale, const std::string& s,
@@ -139,11 +146,13 @@ void SongSelect::moveCursor(int delta) {
 }
 
 // ITG keeps each player's difficulty from song to song: take the chart with the preferred
-// difficulty, else the nearest one.
+// difficulty, else the nearest one. The test autoplay P2 (no pad) follows the first player.
 void SongSelect::pickCharts() {
     const ddr::SongEntry* s = session_.chosen();
     if (!s || s->charts.empty()) return;
     for (SessionPlayer& p : session_.players) {
+        if (p.bot && !session_.players.empty() && !session_.players[0].bot)
+            p.preferred = session_.players[0].preferred;
         int best = 0, best_d = 1000;
         for (int i = 0; i < (int)s->charts.size(); i++) {
             const int d = std::abs((int)s->charts[i].difficulty - (int)p.preferred);
@@ -153,131 +162,136 @@ void SongSelect::pickCharts() {
     }
 }
 
-void SongSelect::handleInput() {
-    std::vector<SessionPlayer>& players = session_.players;
+// Opens or closes a pack; the cursor goes to (or stays on) the pack's header.
+void SongSelect::setPackOpen(int pack, bool open) {
+    session_.open_pack = open ? pack : -1;
+    session_.pack = pack;
+    session_.song = -1;
+    buildItems();
+    scroll_ = (float)cursor_;
+}
+
+void SongSelect::handleWheel() {
+    const std::vector<SessionPlayer>& players = session_.players;
+    const u64 now = wii::Input::nowUs();
     const u16 down0 = input_.down(0);
 
-    // Join: START on a port that isn't playing yet (doc 06 §11.2). The press only joins.
+    // A port that isn't playing: the players are set on the Players screen, nowhere else.
     for (int port = 0; port < wii::Input::kPorts; port++) {
-        if (!(input_.down(port) & PAD_BUTTON_START) || (input_.held(port) & PAD_TRIGGER_Z)) continue;
-        auto it = std::find_if(players.begin(), players.end(),
-                               [&](const SessionPlayer& p) { return p.port == port; });
-        if (it != players.end()) {
-            // Already playing, unless it's a debug autoplay player (Y): a human takes it over.
-            if (!it->autoplay || port == 0) continue;
-            it->autoplay = false;
-            return;
+        if (!(input_.down(port) & (PAD_BUTTON_A | PAD_BUTTON_START))) continue;
+        bool playing = false;
+        for (const SessionPlayer& p : players) playing = playing || (p.port == port && !p.bot);
+        if (!playing) {
+            session_.message = "Players are chosen on the Players screen (B)";
+            message_frame_ = frames_;
         }
-        if ((int)players.size() >= Session::kMaxPlayers) continue;
-        SessionPlayer np;
-        np.port = port;
-        np.speed = session_.config.ports[port].scrollSpeed;
-        if (!players.empty()) np.preferred = players[0].preferred;
-        players.push_back(np);
-        pickCharts();
-        return;
     }
-
-    // Debug: Y on port 1 adds an autoplay player on a free port, or removes it.
-    if (down0 & PAD_BUTTON_Y) {
-        // Only the extra test player (autoplay on a port other than 1), never P1 on autoplay.
-        auto it = std::find_if(players.begin(), players.end(),
-                               [](const SessionPlayer& p) { return p.autoplay && p.port != 0; });
-        if (it != players.end()) {
-            players.erase(it);
-        } else if ((int)players.size() < Session::kMaxPlayers) {
-            for (int port = 1; port < wii::Input::kPorts; port++) {
-                bool used = false;
-                for (const SessionPlayer& p : players) used = used || p.port == port;
-                if (used) continue;
-                SessionPlayer np;
-                np.port = port;
-                np.speed = session_.config.ports[port].scrollSpeed;
-                np.autoplay = true;
-                np.preferred = players.empty() ? ddr::Difficulty::Easy : players[0].preferred;
-                players.push_back(np);
-                break;
-            }
-        }
-        pickCharts();
-    }
-    if (down0 & PAD_TRIGGER_R) {   // the offset calibration screen
+    if (down0 & PAD_TRIGGER_R) {   // the offset calibration screen (controller only)
         calibrate_ = true;
         return;
     }
 
-    if (players.empty() && (down0 & PAD_BUTTON_B)) back_ = true;
+    // Up/Down from any player's pad, held to repeat.
+    u16 down = 0, held = 0;
+    for (const SessionPlayer& p : players) {
+        if (p.bot) continue;
+        down |= input_.down(p.port);
+        held |= input_.held(p.port);
+    }
+    if (wheel_up_.update(down & PAD_BUTTON_UP, held & PAD_BUTTON_UP, now)) moveCursor(-1);
+    if (wheel_down_.update(down & PAD_BUTTON_DOWN, held & PAD_BUTTON_DOWN, now)) moveCursor(1);
+    if (items_.empty()) return;
 
-    // Per player: difficulty, speed, autoplay, leave. Wheel and START from any joined human port.
+    const Item it = items_[cursor_];
+    if (down & PAD_BUTTON_RIGHT) {   // open the pack under the cursor
+        if (it.song < 0 && session_.open_pack != it.pack) setPackOpen(it.pack, true);
+    } else if (down & PAD_BUTTON_LEFT) {   // close the open pack (from a song or its header)
+        if (it.song >= 0 || session_.open_pack == it.pack) setPackOpen(it.pack, false);
+    } else if (down & PAD_BUTTON_A) {
+        if (it.song < 0)
+            setPackOpen(it.pack, session_.open_pack != it.pack);
+        else if (session_.chosen() && !session_.chosen()->charts.empty())
+            openPopup();
+    } else if (down & PAD_BUTTON_B) {
+        back_ = true;
+    }
+}
+
+void SongSelect::openPopup() {
+    popup_ = true;
+    for (size_t i = 0; i < session_.players.size(); i++) {
+        SessionPlayer& p = session_.players[i];
+        p.ready = p.bot;   // the test autoplay P2 has no pad: always ready
+        row_[i] = 0;
+        speed_rep_[i][0].reset();
+        speed_rep_[i][1].reset();
+    }
+}
+
+void SongSelect::handlePopup() {
     const ddr::SongEntry* s = session_.chosen();
-    int dir = 0, held_dir = 0;
-    bool start = false;
-    for (size_t i = 0; i < players.size(); i++) {
+    std::vector<SessionPlayer>& players = session_.players;
+    const u64 now = wii::Input::nowUs();
+    if (!s || s->charts.empty()) {
+        popup_ = false;
+        return;
+    }
+    for (size_t i = 0; i < players.size() && i < Session::kMaxPlayers; i++) {
         SessionPlayer& p = players[i];
-        if (p.autoplay && p.port != 0) continue;   // a debug autoplay player has no pad
+        if (p.bot) continue;
         const u16 d = input_.down(p.port), h = input_.held(p.port);
-        if (h & PAD_BUTTON_A) {   // A held: Up/Down set the scroll speed (saved per port)
-            double sp = p.speed;
-            if (d & PAD_BUTTON_UP) sp = std::min(kMaxSpeed, sp + kSpeedStep);
-            if (d & PAD_BUTTON_DOWN) sp = std::max(kMinSpeed, sp - kSpeedStep);
-            if (sp != p.speed) {
-                p.speed = sp;
-                session_.config.ports[p.port].scrollSpeed = sp;
-                session_.config_dirty = true;
-            }
-        } else if (s && !s->charts.empty()) {
-            const int n = (int)s->charts.size();
-            int c = p.chart;
-            if (d & PAD_BUTTON_UP) c = std::max(0, c - 1);
-            if (d & PAD_BUTTON_DOWN) c = std::min(n - 1, c + 1);
-            if (c != p.chart) {
-                p.chart = c;
-                p.preferred = s->charts[c].difficulty;
-            }
-        }
-        if ((d & PAD_TRIGGER_Z) && !(h & PAD_BUTTON_START)) p.autoplay = !p.autoplay;
-        if (d & PAD_BUTTON_LEFT) dir = -1;
-        if (d & PAD_BUTTON_RIGHT) dir = 1;
-        if (h & PAD_BUTTON_LEFT) held_dir = -1;
-        if (h & PAD_BUTTON_RIGHT) held_dir = 1;
-        if ((d & PAD_BUTTON_START) && !(h & PAD_TRIGGER_Z)) start = true;
-        if (d & PAD_BUTTON_B) back_ = true;
-        if (d & PAD_BUTTON_X) {
-            players.erase(players.begin() + i);
+        if (d & PAD_BUTTON_B) {   // anyone's B closes it for everyone
+            popup_ = false;
+            for (SessionPlayer& q : players) q.ready = false;
             return;
         }
-    }
-
-    const u64 now = wii::Input::nowUs();
-    if (dir) {
-        moveCursor(dir);
-        repeat_dir_ = dir;
-        repeat_at_us_ = now + kRepeatDelayUs;
-    } else if (held_dir && held_dir == repeat_dir_ && now >= repeat_at_us_) {
-        moveCursor(held_dir);
-        repeat_at_us_ = now + kRepeatUs;
-    } else if (!held_dir) {
-        repeat_dir_ = 0;
-    }
-
-    if (start && !items_.empty()) {
-        const Item it = items_[cursor_];
-        if (it.song < 0) {   // a pack header: open it, or close it if it's open
-            session_.open_pack = session_.open_pack == it.pack ? -1 : it.pack;
-            session_.pack = it.pack;
-            session_.song = -1;
-            buildItems();
-            scroll_ = (float)cursor_;
-        } else if (!players.empty()) {
-            picked_ = true;
+        // Speed repeats while Left/Right is held; the repeaters run every frame.
+        const bool sp_left = speed_rep_[i][0].update(d & PAD_BUTTON_LEFT, h & PAD_BUTTON_LEFT, now);
+        const bool sp_right = speed_rep_[i][1].update(d & PAD_BUTTON_RIGHT, h & PAD_BUTTON_RIGHT, now);
+        if (p.ready) {   // arrows locked; A un-readies
+            if (d & PAD_BUTTON_A) p.ready = false;
+            continue;
+        }
+        int& row = row_[i];
+        if (d & PAD_BUTTON_UP) row = (row + kRows - 1) % kRows;
+        if (d & PAD_BUTTON_DOWN) row = (row + 1) % kRows;
+        const int dir = (d & PAD_BUTTON_LEFT) ? -1 : (d & PAD_BUTTON_RIGHT) ? 1 : 0;
+        ddr::PortConfig& pc = session_.config.ports[p.port];
+        if (row == 0 && dir) {   // the song's charts, easiest first
+            const int c = std::max(0, std::min((int)s->charts.size() - 1, p.chart + dir));
+            p.chart = c;
+            p.preferred = s->charts[c].difficulty;
+            pickCharts();   // an autoplay P2 follows
+        } else if (row == 1 && (sp_left || sp_right)) {
+            const double sp = std::max(kMinSpeed, std::min(kMaxSpeed, p.speed + (sp_left ? -kSpeedStep : kSpeedStep)));
+            if (sp != p.speed) {
+                p.speed = pc.scrollSpeed = sp;
+                session_.config_dirty = true;
+            }
+        } else if (row == 2 && dir) {   // Off, On, On no fail
+            p.life_bar = (ddr::LifeBar)(((int)p.life_bar + dir + 3) % 3);
+            pc.lifeBar = p.life_bar;
+            session_.config_dirty = true;
+        } else if (row == 3 && dir) {
+            p.autoplay = !p.autoplay;
+        }
+        if (d & PAD_BUTTON_A) {
+            if (row != kRows - 1) row = kRows - 1;
+            else p.ready = true;
         }
     }
+    bool all = !players.empty();
+    for (const SessionPlayer& p : players) all = all && p.ready;
+    if (all) picked_ = true;
 }
 
 bool SongSelect::frame() {
     frames_++;
-    if (frames_ == 300) session_.message.clear();   // shown for about 5 s
-    handleInput();
+    if (frames_ - message_frame_ == 300) session_.message.clear();   // shown for about 5 s
+    if (popup_)
+        handlePopup();
+    else
+        handleWheel();
     updateMedia();
     draw();
     const u16 held = input_.held(0);
@@ -321,8 +335,7 @@ void SongSelect::draw() {
     render::rect(0, 0, video_.width(), 46, 0x000000A0);   // header bar
     drawWheel();
     GRRLIB_SetAntiAliasing(false);
-    font_.print(kLeftX, 24, kWhite, 1, "SELECT MUSIC  %s",
-                session_.config.playMode == ddr::PlayMode::Competitive ? "COMPETITIVE" : "CASUAL");
+    font_.print(kLeftX, 24, kWhite, 1, "SELECT MUSIC");
     char buf[48];
     std::snprintf(buf, sizeof buf, "%d songs  scan %lu ms  %d cached", (int)session_.library.SongCount(),
                   (unsigned long)(session_.scan_us / 1000), session_.cache_hits);
@@ -333,13 +346,13 @@ void SongSelect::draw() {
     if (!session_.message.empty())
         font_.print(kLeftX, 436, 0xFFC040FF, 1, "%s", session_.message.c_str());
     else
-        font_.print(kLeftX, 436, kGrey, 1, "offset %+.1f ms  A+Up/Down speed  R calibrate  B back",
-                    session_.config.globalOffsetS * 1000);
+        font_.print(kLeftX, 436, kGrey, 1, "Up/Down scroll  Right open  Left close  A select  B back");
     if (!session_.scanned)
         font_.print(kLeftX, 200, 0xFF5050FF, 1, "can't open sd:/ddrwii/songs");
     else if (session_.library.packs.empty())
         font_.print(kLeftX, 200, 0xFF5050FF, 1, "no songs in sd:/ddrwii/songs");
     GRRLIB_SetAntiAliasing(true);
+    if (popup_) drawPopup(s);
 }
 
 void SongSelect::drawSongInfo(const ddr::SongEntry* s) {
@@ -415,41 +428,42 @@ void SongSelect::drawGrid(const ddr::SongEntry* s) {
 }
 
 // One pane per player slot along the bottom: the chart and its counts (Simply Love's
-// PaneDisplay), coloured by difficulty. An empty slot asks for START.
+// PaneDisplay), coloured by difficulty, with the speed, the life bar setting and the best.
 void SongSelect::drawPane(int slot, const ddr::SongEntry* s) {
     const float x = kPaneX[slot], y = kPaneY;
     if (slot >= (int)session_.players.size()) {
         render::rect(x, y, kPaneW, kPaneH, 0x1E282F80);
-        if (frames_ / 30 % 2 == 0 || session_.players.empty())
-            printCentred(font_, x + kPaneW / 2, y + 34, kGrey, 1, "Press START", 30);
         return;
     }
     const SessionPlayer& p = session_.players[slot];
     const ddr::ChartInfo* c = (s && p.chart < (int)s->charts.size()) ? &s->charts[p.chart] : nullptr;
     render::rect(x, y, kPaneW, kPaneH, c ? difficultyColour(c->difficulty) : kPlayerColour[slot]);
     char buf[48];
-    std::snprintf(buf, sizeof buf, "P%d  port %d%s", slot + 1, p.port + 1, p.autoplay ? "  AUTO" : "");
+    std::snprintf(buf, sizeof buf, "P%d  %.2fx%s", slot + 1, p.speed, p.autoplay ? "  AUTO" : "");
     font_.print(x + 8, y + 6, kBlack, 1, "%s", buf);
+    const char* life = lifeBarText(p.life_bar);
     if (!c) {
         font_.print(x + 8, y + 30, kBlack, 1, "%s", ddr::DifficultyToString(p.preferred));
-        font_.print(x + 8, y + 66, kBlack, 1, "Speed %.2fx", p.speed);
+        font_.print(x + 8, y + 48, kBlack, 1, "open a pack with Right or A");
+        font_.print(x + kPaneW - 8 - std::strlen(life) * kGlyph, y + 66, kBlack, 1, "%s", life);
         return;
     }
     std::snprintf(buf, sizeof buf, "%s %d", ddr::DifficultyToString(c->difficulty), c->meter);
     font_.print(x + kPaneW - 8 - std::strlen(buf) * kGlyph, y + 6, kBlack, 1, "%s", buf);
     font_.print(x + 8, y + 30, kBlack, 1, "Steps %4d  Holds %3d", c->steps, c->holds);
     font_.print(x + 8, y + 48, kBlack, 1, "Jumps %4d  Mines %3d", c->jumps, c->mines);
-    font_.print(x + 8, y + 66, kBlack, 1, "Rolls %4d  Speed %.2fx", c->rolls, p.speed);
+    font_.print(x + 8, y + 66, kBlack, 1, "Rolls %4d", c->rolls);
+    font_.print(x + kPaneW - 8 - std::strlen(life) * kGlyph, y + 66, kBlack, 1, "%s", life);
 
-    // The machine best for this chart in the current play mode (doc 06 §7), on the right.
-    // Looked up only when the slot's song or chart changes (the mode and the table don't
-    // change while song select is open, and map entries don't move).
+    // The machine best for this chart (doc 06 §7), on the right. Looked up only when the
+    // slot's song or chart changes (the table doesn't change while song select is open, and
+    // map entries don't move).
     PaneBest& pb = pane_best_[slot];
     if (pb.pack != session_.pack || pb.song != session_.song || pb.chart != p.chart) {
         pb.pack = session_.pack;
         pb.song = session_.song;
         pb.chart = p.chart;
-        pb.entry = session_.scores.find(game::ChartKey(session_.config.playMode, *s, *c));
+        pb.entry = session_.scores.find(game::ChartKey(*s, *c));
     }
     const game::HighScoreEntry* best = pb.entry;
     if (best) {
@@ -462,6 +476,76 @@ void SongSelect::drawPane(int slot, const ddr::SongEntry* s) {
         const char* g = game::GradeTierName(best->best.tier());
         font_.print(x + kPaneW - 8 - std::strlen(g) * kGlyph, y + 48, kBlack, 1, "%s", g);
     }
+}
+
+// The song settings popup over the screen: a row per setting, a column per player, each
+// player's cursor as an outline in their colour (the menu prototype's layout).
+void SongSelect::drawPopup(const ddr::SongEntry* s) {
+    static const char* const kRowName[kRows] = {"Difficulty", "Speed", "Life bar", "Autoplay", "Ready"};
+    static const char* const kLifeName[3] = {"< Off >", "< On >", "< On, no fail >"};
+    constexpr float kBoxX = 48, kBoxY = 56, kBoxW = 544, kBoxH = 380;
+    constexpr float kColX[Session::kMaxPlayers] = {248, 416};
+    constexpr float kColW = 152, kRowY = 108, kRowStep = 46, kRowH = 40;
+    const std::vector<SessionPlayer>& players = session_.players;
+
+    render::rect(0, 0, video_.width(), video_.height(), 0x00000099);
+    render::rect(kBoxX, kBoxY, kBoxW, kBoxH, kBox);
+    render::rect(kBoxX, kBoxY, kBoxW, 4, kPlayerColour[0]);
+    for (int r = 0; r < kRows; r++) {
+        const float y = kRowY + r * kRowStep;
+        render::rect(64, y, 512, kRowH, kDark);
+        for (size_t n = 0; n < players.size() && n < Session::kMaxPlayers; n++) {
+            render::rect(kColX[n], y, kColW, kRowH, 0x26323AFF);
+            if (row_[n] != r || players[n].ready) continue;
+            const u32 c = kPlayerColour[n];   // the cursor: a 2 px outline
+            render::rect(kColX[n], y, kColW, 2, c);
+            render::rect(kColX[n], y + kRowH - 2, kColW, 2, c);
+            render::rect(kColX[n], y, 2, kRowH, c);
+            render::rect(kColX[n] + kColW - 2, y, 2, kRowH, c);
+        }
+    }
+
+    GRRLIB_SetAntiAliasing(false);
+    font_.print(64, 68, kWhite, 1, "SONG SETTINGS");
+    if (s) printFit(font_, 576 - std::min((int)s->title.size(), 30) * kGlyph, 68, kGrey, 1, s->title, 30);
+    for (size_t n = 0; n < players.size() && n < Session::kMaxPlayers; n++)
+        printCentred(font_, kColX[n] + kColW / 2, 88, kPlayerColour[n], 1, n == 0 ? "P1" : "P2", 2);
+    for (int r = 0; r < kRows; r++) {
+        const float y = kRowY + r * kRowStep;
+        if (r == 3) {
+            font_.print(80, y + 4, kWhite, 1, "Autoplay");
+            font_.print(80, y + 21, kGrey, 1, "demo, no score");
+        } else {
+            font_.print(80, y + 12, kWhite, 1, "%s", kRowName[r]);
+        }
+        for (size_t n = 0; n < players.size() && n < Session::kMaxPlayers; n++) {
+            const SessionPlayer& p = players[n];
+            char buf[32];
+            u32 c = kWhite;
+            if (r == 0 && s && p.chart < (int)s->charts.size()) {
+                const ddr::ChartInfo& ch = s->charts[p.chart];
+                std::snprintf(buf, sizeof buf, "< %s %d >", ddr::DifficultyToString(ch.difficulty), ch.meter);
+                c = difficultyColour(ch.difficulty);
+            } else if (r == 1) {
+                std::snprintf(buf, sizeof buf, "< %.2fx >", p.speed);
+            } else if (r == 2) {
+                std::snprintf(buf, sizeof buf, "%s", kLifeName[(int)p.life_bar]);
+            } else if (r == 3) {
+                std::snprintf(buf, sizeof buf, "%s", p.autoplay ? "< On >" : "< Off >");
+            } else {
+                std::snprintf(buf, sizeof buf, "%s", p.ready ? "Ready" : "press A");
+                c = p.ready ? 0x50D070FF : kGrey;
+            }
+            if (p.ready && r < kRows - 1) c = kGrey;
+            printCentred(font_, kColX[n] + kColW / 2, y + 12, c, 1, buf, 18);
+        }
+    }
+    bool any_ready = false;
+    for (const SessionPlayer& p : players) any_ready = any_ready || (p.ready && !p.bot);
+    font_.print(64, 372, kGrey, 1, "Up/Down row   Left/Right change   A on Ready");
+    font_.print(64, 392, kGrey, 1, "%s", any_ready ? "A again un-readies   B back to the song list"
+                                                    : "B back to the song list");
+    GRRLIB_SetAntiAliasing(true);
 }
 
 // The music wheel: pack headers (grey) and the open pack's songs (dark), cursor row in the
