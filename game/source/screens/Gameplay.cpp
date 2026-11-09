@@ -106,20 +106,20 @@ bool Gameplay::loadSong(const Session& session) {
         p.autoplay = sp.autoplay;
         p.input_offset_s = session.config.ports[sp.port].inputOffsetS;
         p.speed = sp.speed;
+        p.life_bar = sp.life_bar;
         const int ci = sp.chart < (int)entry->charts.size() ? entry->charts[sp.chart].index : -1;
         if (ci < 0 || ci >= (int)song_.charts.size() || song_.charts[ci].notes.empty()) {
             error_ = "chart missing in " + entry->SimfilePath();
             return false;
         }
         p.chart = ci;
-        p.score_key = game::ChartKey(session.config.playMode, *entry, entry->charts[sp.chart]);
+        p.score_key = game::ChartKey(*entry, entry->charts[sp.chart]);
         if (const game::HighScoreEntry* best = session.scores.find(p.score_key)) {
             p.had_best = true;
             p.prev_best = best->best;
         }
         players_.push_back(std::move(p));
     }
-    competitive_ = session.config.playMode == ddr::PlayMode::Competitive;
     layout();
     return true;
 }
@@ -279,9 +279,9 @@ void Gameplay::handleEvents(double offset_us) {
 
 void Gameplay::drainJudge(Player& p, u64 now_us) {
     for (const game::JudgeEvent& e : p.judge.events()) {
-        if (competitive_ && !p.failed) {
+        if (p.life_bar != ddr::LifeBar::Off && !p.failed) {
             p.life.apply(e);
-            if (p.life.failed()) {
+            if (p.life.failed() && p.life_bar == ddr::LifeBar::On) {   // no fail: the bar stays
                 p.failed = true;
                 p.failed_us = now_us;
             }
@@ -395,7 +395,7 @@ void Gameplay::drawPlayer(Player& p, double beat, u64 now_us) {
         render::rect(p.centre_x - field_w / 2, 0, field_w, h, 0x101828C0);
         printCentred(font_, p.centre_x, 200, 0xFF4040FF, 3, "FAILED");
     }
-    if (competitive_) drawLife(p);
+    if (p.life_bar != ddr::LifeBar::Off) drawLife(p);
 
     // Judgement, ms error, combo and score.
     char buf[48];

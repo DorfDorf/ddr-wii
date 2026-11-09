@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// ddr-wii entry point. Loads config.ini, scans the song library, then boots into the play-mode
-// screen (Casual / Competitive), then song select, which hands the picked song to gameplay and
-// gets it back after the results. B in song select goes back to the mode screen; B on port 1
-// there cycles through the M4b audio clock test, the M2b playfield stress test and the M2
-// render test, and back.
+// ddr-wii entry point. Loads config.ini, scans the song library, then boots into the Players
+// screen (1 or 2 players), then song select, which hands the picked song to gameplay and gets
+// it back after the results. B in song select goes back to Players; B on Players (until the
+// title screen exists) cycles through the M4b audio clock test, the M2b playfield stress test
+// and the M2 render test, and back.
 #include <fat.h>
 #include <gccore.h>
 #include <ogc/lwp_watchdog.h>
@@ -16,7 +16,7 @@
 #include "screens/AudioClockTest.h"
 #include "screens/Gameplay.h"
 #include "screens/OffsetCalibration.h"
-#include "screens/PlayModeSelect.h"
+#include "screens/Players.h"
 #include "screens/PlayfieldStress.h"
 #include "screens/RenderTest.h"
 #include "screens/Session.h"
@@ -40,7 +40,7 @@ bool runScene(wii::Video& video, wii::Input& input, Scene& scene, bool b_next = 
     }
 }
 
-// Writes config.ini if a screen changed it (play mode, scroll speeds).
+// Writes config.ini if a screen changed it (scroll speeds, life bars).
 void saveConfigIfChanged(screens::Session& session) {
     if (!session.config_dirty) return;
     session.config_dirty = false;
@@ -92,15 +92,16 @@ int main(int, char**) {
         session.message = "Couldn't write sd:/ddrwii/cache.txt";
 
     int which = 0;
-    bool in_song_select = false;   // else the play-mode screen
+    bool in_song_select = false;   // else the Players screen
     for (;;) {
         bool next;
         if (which == 0 && !in_song_select) {
             bool chosen;
             {
-                screens::PlayModeSelect scene(video, input, font, session);
-                next = runScene(video, input, scene);
-                chosen = !next && scene.chosen();
+                screens::Players scene(video, input, font, session);
+                runScene(video, input, scene, false);
+                chosen = scene.chosen();
+                next = scene.back();
             }
             saveConfigIfChanged(session);
             if (chosen) {

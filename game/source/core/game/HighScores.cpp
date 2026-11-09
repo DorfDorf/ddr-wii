@@ -17,10 +17,6 @@ const char* const kTierNames[kNumGradeTiers + 1] = {
     "F",  "****", "***", "**", "*",  "S+", "S",  "S-", "A+",
     "A",  "A-",   "B+",  "B",  "B-", "C+", "C",  "C-", "D"};
 
-const char* ModeName(ddr::PlayMode m) {
-  return m == ddr::PlayMode::Competitive ? "Competitive" : "Casual";
-}
-
 }  // namespace
 
 int GradeTier(int percent_x100, bool failed) {
@@ -39,14 +35,14 @@ bool Better(const HighScore& a, const HighScore& b) {
   return a.percent_x100 > b.percent_x100;
 }
 
-std::string ChartKey(ddr::PlayMode mode, const ddr::SongEntry& song, const ddr::ChartInfo& chart) {
+std::string ChartKey(const ddr::SongEntry& song, const ddr::ChartInfo& chart) {
   // dir is "<root>/<pack>/<song>/": keep "<pack>/<song>".
   std::vector<std::string> parts;
   ddr::Split(song.dir, '/', parts);
   std::string folder = parts.size() >= 2 ? parts[parts.size() - 2] + "/" + parts.back()
                                          : song.dir;
-  return std::string(ModeName(mode)) + "\t" + ddr::CleanField(folder) + "\t" +
-         ddr::DifficultyToString(chart.difficulty) + "\t" + ddr::CleanField(chart.description);
+  return ddr::CleanField(folder) + "\t" + ddr::DifficultyToString(chart.difficulty) + "\t" +
+         ddr::CleanField(chart.description);
 }
 
 bool HighScoreTable::submit(const std::string& key, const HighScore& score) {
@@ -70,30 +66,47 @@ const HighScoreEntry* HighScoreTable::find(const std::string& key) const {
 void HighScoreTable::parse(const std::string& text) {
   std::vector<std::string> lines;
   ddr::Split(text, '\n', lines);
+  std::map<std::string, HighScoreEntry> old;   // lines with a play mode, merged per chart
   for (std::string& line : lines) {
     ddr::TrimRight(line, "\r");
     if (line.empty() || line[0] == '#') continue;
     std::vector<std::string> f;
     ddr::Split(line, '\t', f, false);   // the description may be empty
-    if (f.size() != 9) continue;
-    if (f[0] != "Casual" && f[0] != "Competitive") continue;
-    if (f[1].empty() || ddr::StringToDifficulty(f[2]) == ddr::Difficulty::Invalid) continue;
+    const bool with_mode = f.size() == 9 && (f[0] == "Casual" || f[0] == "Competitive");
+    if (with_mode)
+      f.erase(f.begin());
+    else if (f.size() != 8)
+      continue;
+    if (f[0].empty() || ddr::StringToDifficulty(f[1]) == ddr::Difficulty::Invalid) continue;
     HighScoreEntry e;
-    e.best.percent_x100 = ddr::StringToInt(f[4]);
-    e.best.failed = f[5] == "1";
-    e.best.max_combo = ddr::StringToInt(f[6]);
-    e.plays = ddr::StringToInt(f[7]);
-    e.clears = ddr::StringToInt(f[8]);
+    e.best.percent_x100 = ddr::StringToInt(f[3]);
+    e.best.failed = f[4] == "1";
+    e.best.max_combo = ddr::StringToInt(f[5]);
+    e.plays = ddr::StringToInt(f[6]);
+    e.clears = ddr::StringToInt(f[7]);
     if (e.best.percent_x100 < 0 || e.best.percent_x100 > 10000 || e.plays < 1) continue;
-    map_[f[0] + "\t" + f[1] + "\t" + f[2] + "\t" + f[3]] = e;
+    const std::string key = f[0] + "\t" + f[1] + "\t" + f[2];
+    if (!with_mode) {
+      map_[key] = e;
+      continue;
+    }
+    auto it = old.find(key);
+    if (it == old.end()) {
+      old[key] = e;
+      continue;
+    }
+    HighScoreEntry& m = it->second;
+    if (Better(e.best, m.best)) m.best = e.best;
+    m.plays += e.plays;
+    m.clears += e.clears;
   }
+  for (const auto& kv : old) map_.insert(kv);   // a new-format line for the chart wins
 }
 
 std::string HighScoreTable::write() const {
   std::string out =
       "# ddr-wii high scores, one chart per line (tab-separated):\n"
-      "# mode, pack/song, difficulty, description, percent x100, failed, max combo, plays, "
-      "clears\n";
+      "# pack/song, difficulty, description, percent x100, failed, max combo, plays, clears\n";
   char buf[96];
   for (const auto& kv : map_) {
     const HighScoreEntry& e = kv.second;

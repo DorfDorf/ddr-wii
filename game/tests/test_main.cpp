@@ -39,6 +39,7 @@
 #include "../source/core/chart/StringUtil.h"
 #include "../source/core/timing/TimingData.h"
 #include "../source/core/input/InputFilter.h"
+#include "../source/core/input/MenuRepeat.h"
 #include "../source/core/audio/WavFile.h"
 #include "../source/core/timing/SongClock.h"
 #include "../source/core/game/Judge.h"
@@ -1273,8 +1274,12 @@ static void TestConfig(const std::string& dir) {
   std::printf("[unit] config.ini\n");
   Config c;
   ParseConfig("[Options]\r\nGlobalOffset= -12.5 \r\nDefaultSyncOffset=itg\r\nInputDebounceMs=10\r\n"
-              "PlayMode=competitive\r\n[Port2]\r\nInputOffset=4\r\nScrollSpeed=3.3\r\n", c);
-  CHECK(c.playMode == PlayMode::Competitive);
+              "PlayMode=competitive\r\n[Port2]\r\nInputOffset=4\r\nScrollSpeed=3.3\r\nLifeBar=nofail\r\n"
+              "[Port3]\r\nLifeBar=Off\r\n", c);
+  // The old PlayMode=Competitive turns the bar on where a port has no LifeBar of its own.
+  CHECK(c.ports[0].lifeBar == LifeBar::On && c.ports[3].lifeBar == LifeBar::On);
+  CHECK(c.ports[1].lifeBar == LifeBar::NoFail && c.ports[2].lifeBar == LifeBar::Off);
+  CHECK(Config().ports[0].lifeBar == LifeBar::Off);
   CHECK_NEAR(c.ports[1].scrollSpeed, 3.25, 1e-12);   // rounded to 0.25
   CHECK_NEAR(c.ports[0].scrollSpeed, 2.0, 1e-12);
   CHECK_NEAR(c.globalOffsetS, -0.0125, 1e-12);
@@ -1297,7 +1302,9 @@ static void TestConfig(const std::string& dir) {
   CHECK_NEAR(e.globalOffsetS, c.globalOffsetS, 1e-9);
   CHECK(e.defaultSyncOffset == c.defaultSyncOffset && e.inputDebounceMs == c.inputDebounceMs);
   CHECK_NEAR(e.ports[1].inputOffsetS, 0.004, 1e-9);
-  CHECK(e.playMode == PlayMode::Competitive);
+  CHECK(e.ports[0].lifeBar == LifeBar::On && e.ports[1].lifeBar == LifeBar::NoFail &&
+        e.ports[2].lifeBar == LifeBar::Off);
+  CHECK(WriteConfigText(c).find("PlayMode") == std::string::npos);   // the old key is dropped
   CHECK_NEAR(e.ports[1].scrollSpeed, 3.25, 1e-9);
 
   // Save twice over the same file (the second rename replaces the first file), then load.
@@ -1339,6 +1346,30 @@ static void TestCalibration() {
   // Only the last kWindow presses count: the player settles from 30 ms late to 0.
   for (int k = 100; k < 100 + 32; k++) c.press(k * 0.5);
   CHECK_NEAR(c.mean(), 0.0, 1e-12);
+}
+
+static void TestMenuRepeat() {
+  std::printf("[unit] menu key repeat\n");
+  // 60 fps frames: fires on the press, then at 0.4 s, every 75 ms, every 35 ms after 2 s.
+  input::MenuRepeat r;
+  std::vector<uint64_t> fires;
+  for (uint64_t t = 0; t <= 3000000; t += 16667)
+    if (r.update(t == 0, true, t)) fires.push_back(t);
+  CHECK(!fires.empty() && fires[0] == 0);
+  CHECK(fires.size() > 2 && fires[1] >= 400000 && fires[1] < 420000);
+  CHECK(fires.size() > 3 && fires[2] - fires[1] >= 66000 && fires[2] - fires[1] <= 84000);
+  int fast = 0;
+  for (size_t i = 1; i < fires.size(); i++)
+    if (fires[i] > 2100000) fast += fires[i] - fires[i - 1] <= 34000 + 16667 ? 1 : 0;
+  CHECK(fast > 10);   // every 35 ms (two or three frames) once held for 2 s
+  // 0.4 s + 1.6 s / 75 ms + 1 s / 35 ms, give or take a frame each.
+  CHECK(fires.size() >= 40 && fires.size() <= 55);
+  CHECK(!r.update(false, false, 3100000));   // released
+  CHECK(r.update(false, true, 3200000));     // held again (a press seen only as held) fires
+  CHECK(!r.update(false, true, 3300000));
+  // A slow frame doesn't burst.
+  CHECK(r.update(false, true, 5000000));
+  CHECK(!r.update(false, true, 5001000));
 }
 
 static void TestScoresAndGrades(const std::string& dir) {
@@ -1395,11 +1426,10 @@ static void TestScoresAndGrades(const std::string& dir) {
   ddr::ChartInfo chart;
   chart.difficulty = ddr::Difficulty::Edit;
   chart.description = "tab\there";
-  const std::string key = game::ChartKey(ddr::PlayMode::Competitive, song, chart);
-  CHECK(key == "Competitive\tMy Pack/My Song\tEdit\ttab here");
+  const std::string key = game::ChartKey(song, chart);
+  CHECK(key == "My Pack/My Song\tEdit\ttab here");
   song.dir = "C:/elsewhere/songs/My Pack/My Song/";
-  CHECK(game::ChartKey(ddr::PlayMode::Competitive, song, chart) == key);
-  CHECK(game::ChartKey(ddr::PlayMode::Casual, song, chart) != key);
+  CHECK(game::ChartKey(song, chart) == key);
 
   game::HighScoreTable t;
   CHECK(t.submit(key, fail));            // first play: the best, even failed
@@ -1409,15 +1439,35 @@ static void TestScoresAndGrades(const std::string& dir) {
   CHECK(t.find(key)->plays == 3 && t.find(key)->clears == 2);
   chart.difficulty = ddr::Difficulty::Hard;
   chart.description.clear();
-  const std::string key2 = game::ChartKey(ddr::PlayMode::Casual, song, chart);
+  const std::string key2 = game::ChartKey(song, chart);
   CHECK(t.submit(key2, HighScore{10000, false, 300}));
   CHECK(t.find("nope") == nullptr);
 
   // Write, read back; junk lines are skipped.
   game::HighScoreTable u;
-  u.parse(t.write() + "junk\nCasual\tA/B\tHard\t\t100\t0\t1\t0\t0\n"
-          "Casual\tA/B\tNotADifficulty\t\t100\t0\t1\t1\t1\r\n");
+  u.parse(t.write() + "junk\nA/B\tHard\t\t100\t0\t1\t0\t0\n"
+          "A/B\tNotADifficulty\t\t100\t0\t1\t1\t1\r\n");
   CHECK(u.size() == 2);
+  CHECK(t.write().find("Casual") == std::string::npos);
+
+  // Old files had a play mode in front: still read, and a chart's two modes are merged
+  // (the better best, plays and clears added). A new-format line for the chart wins.
+  game::HighScoreTable o;
+  o.parse("# old\nCasual\tP/S\tEasy\t\t9500\t0\t40\t3\t3\n"
+          "Competitive\tP/S\tEasy\t\t9700\t1\t80\t2\t0\r\n"
+          "Competitive\tP/S\tHard\t\t8000\t0\t50\t1\t1\n"
+          "Competitive\tP/T\tHard\t\t8000\t0\t50\t1\t1\n"
+          "P/T\tHard\t\t6000\t0\t20\t4\t4\n"
+          "Bogus\tP/S\tEasy\t\t100\t0\t1\t1\t1\n");
+  CHECK(o.size() == 3);
+  const game::HighScoreEntry* m = o.find("P/S\tEasy\t");
+  CHECK(m && m->best.percent_x100 == 9500 && !m->best.failed && m->best.max_combo == 40);
+  CHECK(m && m->plays == 5 && m->clears == 3);
+  CHECK(o.find("P/S\tHard\t") && o.find("P/S\tHard\t")->plays == 1);
+  CHECK(o.find("P/T\tHard\t") && o.find("P/T\tHard\t")->best.percent_x100 == 6000);
+  game::HighScoreTable o2;   // and it writes out in the new format
+  o2.parse(o.write());
+  CHECK(o2.size() == 3 && o2.find("P/S\tEasy\t")->plays == 5);
   CHECK(u.find(key) && u.find(key)->best.percent_x100 == 7000 && u.find(key)->plays == 3);
   CHECK(u.find(key2) && u.find(key2)->best.percent_x100 == 10000 &&
         u.find(key2)->best.max_combo == 300 && !u.find(key2)->best.failed);
@@ -1463,6 +1513,7 @@ int main(int argc, char** argv) {
   TestConfig(dir);
   TestCalibration();
   TestScoresAndGrades(dir);
+  TestMenuRepeat();
   RunFuzz(dir, fuzzIterations);
 
   std::printf("\n%d checks, %d failures%s\n", g_checks, g_failures,

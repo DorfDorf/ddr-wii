@@ -22,9 +22,11 @@
 
 namespace ddr {
 
-/** Casual: no life bar, nobody fails. Competitive: ITG's life bar and
- *  failing (Simply Love's Casual and ITG modes). */
-enum class PlayMode { Casual, Competitive };
+/** Each player's life bar, chosen in the song settings popup (doc 06 section
+ *  7): Off (no bar, can't fail), On (ITG's bar and failing), NoFail (the bar
+ *  is shown but can't fail you). */
+enum class LifeBar { Off, On, NoFail };
+const char* LifeBarToString(LifeBar b);   // "Off", "On", "NoFail" (config.ini)
 
 struct PortConfig {
   /** Seconds added to this port's step times (a mat that reads later than
@@ -32,6 +34,8 @@ struct PortConfig {
   double inputOffsetS = 0;
   /** Scroll speed, ITG's x-mod: 1 = 64 px per beat. 0.25-8, steps of 0.25. */
   double scrollSpeed = 2.0;
+  /** The life bar setting last used on this port. */
+  LifeBar lifeBar = LifeBar::Off;
 };
 
 struct Config {
@@ -44,7 +48,6 @@ struct Config {
   DefaultSyncOffset defaultSyncOffset = DefaultSyncOffset::Null;
   /** Pad debounce window (InputFilter); 0-50 ms. */
   int inputDebounceMs = 20;
-  PlayMode playMode = PlayMode::Casual;
   PortConfig ports[kPorts];
 };
 

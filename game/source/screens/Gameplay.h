@@ -2,14 +2,15 @@
 // Gameplay - plays the song SongSelect picked (M4c, M5 step 2): scrolling arrows, judged
 // steps, combo and score, then the results (doc 06 §3.2, §3.4, §11.1).
 //
-// The song, the players (join order, each with their port, chart and autoplay switch) and the
+// The song, the players (P1 first, each with their port, chart, life bar and autoplay) and the
 // global offset come from the Session. Music plays through wii::AudioStream; SongClock follows
 // ASND's mixing tick as in the M4b test, and runs on the CPU clock once the audio has ended so
 // a chart that outlasts its audio still plays out. Notes scroll by beat at each player's
 // speed (ITG x-mod: 1x = 64 px per beat). Mines and rolls are judged (core/game/Judge).
-// Competitive mode adds ITG's life bar (core/game/LifeMeter): a player whose bar empties fails,
+// A player with the life bar On has ITG's bar (core/game/LifeMeter): if it empties they fail,
 // their playfield greys out and stops judging, and the song ends once everyone has failed
-// (doc 06 §11.4). START stops the song; A/START on the results goes back to song select.
+// (doc 06 §11.4). With "On, no fail" the bar is shown but can't fail them; with Off there's
+// no bar. START stops the song; A/START on the results goes back to song select.
 // A song that plays out (or that everyone failed) records each human player's score in the
 // Session's high-score table; a stopped song and autoplay players record nothing (doc 06 §7).
 #pragma once
@@ -50,7 +51,8 @@ private:
         bool autoplay = false;
         double input_offset_s = 0;  // config.ini [PortN] InputOffset
         double speed = 2.0;         // scroll speed (x-mod)
-        game::LifeMeter life;       // Competitive only
+        ddr::LifeBar life_bar = ddr::LifeBar::Off;
+        game::LifeMeter life;       // life bar On or NoFail
         bool failed = false;
         u64 failed_us = 0;
         u64 mine_flash_us[game::Judge::kMaxLanes] = {};
@@ -68,7 +70,7 @@ private:
         u64 lane_flash_us[game::Judge::kMaxLanes] = {};
         game::Grade lane_flash[game::Judge::kMaxLanes] = {};
         // High score (doc 06 §7).
-        std::string score_key;      // game::ChartKey for this chart and play mode
+        std::string score_key;      // game::ChartKey for this chart
         bool had_best = false;      // a best existed before this play
         game::HighScore prev_best;
         bool new_best = false;
@@ -93,7 +95,6 @@ private:
     const render::Font& font_;
 
     State state_ = State::Error;
-    bool competitive_ = false;  // life bars and failing
     u64 all_failed_us_ = 0;     // when the last player failed (the song ends shortly after)
     Session& session_;
     bool recorded_ = false;     // finish() saved the scores (false: stopped with START)

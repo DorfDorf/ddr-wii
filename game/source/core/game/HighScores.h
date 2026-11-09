@@ -6,14 +6,16 @@
 // 100% down to D, and F for a failed play. As in StepMania, the tier is the first one whose
 // percentage the score reaches.
 //
-// One best per chart and play mode (Casual scores can't fail, so they're kept apart). A
-// passed score beats a failed one, then the higher % wins. Autoplay scores aren't recorded
-// (the caller's job). There are no player names or profiles yet: these are machine bests.
+// One best per chart, whatever the life bar setting or speed. A passed score beats a failed
+// one, then the higher % wins. Autoplay scores aren't recorded (the caller's job). There are
+// no player names or profiles yet: these are machine bests (a top 10 with names comes later,
+// doc 06 §7).
 //
 // scores.txt is text, one chart per line, tab-separated:
-//   mode, pack/song folder, difficulty, description, percent x100, failed, max combo,
-//   plays, clears
-// Lines that don't parse are skipped. It's written whole to a temp file and renamed, like
+//   pack/song folder, difficulty, description, percent x100, failed, max combo, plays, clears
+// Older files had a play mode (Casual/Competitive) in front; those lines are still read, and
+// a chart's two modes are merged (the better best, plays and clears added up). Lines that
+// don't parse are skipped. It's written whole to a temp file and renamed, like
 // config.ini. Original to ddr-wii. Portable C++17, no libogc: tested on the PC.
 #pragma once
 
@@ -45,9 +47,9 @@ struct HighScoreEntry {
   int clears = 0;   // plays that didn't fail
 };
 
-// "<mode>\t<pack>/<song>\t<difficulty>\t<description>". The song is named by its last two
-// folders, so the key survives moving the songs root.
-std::string ChartKey(ddr::PlayMode mode, const ddr::SongEntry& song, const ddr::ChartInfo& chart);
+// "<pack>/<song>\t<difficulty>\t<description>". The song is named by its last two folders,
+// so the key survives moving the songs root.
+std::string ChartKey(const ddr::SongEntry& song, const ddr::ChartInfo& chart);
 
 class HighScoreTable {
  public:
@@ -56,7 +58,8 @@ class HighScoreTable {
   const HighScoreEntry* find(const std::string& key) const;
   size_t size() const { return map_.size(); }
 
-  // Adds the lines of a scores.txt (an entry already there is replaced).
+  // Adds the lines of a scores.txt (an entry already there is replaced; old two-mode lines
+  // for one chart are merged).
   void parse(const std::string& text);
   std::string write() const;
 

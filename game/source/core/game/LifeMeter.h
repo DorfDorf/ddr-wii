@@ -8,7 +8,7 @@
 // Software Foundation, either version 3 of the License, or (at your option)
 // any later version. See the LICENSE file in the repository root.
 //
-// LifeMeter - ITG's life bar for Competitive mode (doc 06 §7; M5 step 4). Port of
+// LifeMeter - ITG's life bar, for a player with the life bar On (doc 06 §3.4; M5 step 4). Port of
 // ITGmania v1.3.0 src/LifeMeterBar.cpp (normal drain only) with the values Simply Love
 // sets for its ITG mode. See LifeMeter.cpp for the notice and what changed.
 
