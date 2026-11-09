@@ -15,6 +15,7 @@
 #include "render/ArrowArt.h"
 #include "render/Draw.h"
 #include "render/Font.h"
+#include "screens/MenuUi.h"
 
 namespace screens {
 namespace {
@@ -58,14 +59,15 @@ void OffsetCalibration::save() {
         std::snprintf(buf, sizeof buf, "Offset %+.1f ms saved to config.ini", offset_s_ * 1000);
         session_.message = buf;
     } else {
-        session_.message = "Couldn't write sd:/ddrwii/config.ini (offset kept until power off)";
+        session_.message = "Couldn't write config.ini (kept until power off)";
     }
 }
 
 bool OffsetCalibration::frame() {
     const u64 now_us = wii::Input::nowUs();
     const u16 down0 = input_.down(0);
-    if (down0 & PAD_BUTTON_B) return false;   // back, nothing saved
+    for (int port = 0; port < wii::Input::kPorts; port++)
+        if (input_.down(port) & PAD_BUTTON_B) return false;   // back, nothing saved
 
     if (!error_) {
         const wii::AudioStream::TickReport t = stream_.tickReport();
@@ -166,9 +168,9 @@ bool OffsetCalibration::frame() {
         std::snprintf(buf, sizeof buf, "suggested offset %+.1f ms", cal_.suggestedOffset() * 1000);
         printCentred(font_, 330, warn, 2, buf);
     }
-    font_.print(64, 384, grey, 1, cal_.ready() ? "START save the suggested offset" : "START save the current offset");
-    font_.print(64, 400, grey, 1, "L/R adjust 5 ms   Z clear steps   Y auto steps");
-    font_.print(64, 416, grey, 1, "B back without saving");
+    printCentred(font_, 372, grey, 1, "Nudge it by hand with Left/Right on Calibrate offset in Options.");
+    ui::help(font_, "A save the suggested offset   Z clear steps   B back without saving",
+             "Controller only: L/R adjust 5 ms   Y auto steps");
     GRRLIB_SetAntiAliasing(true);
     return true;
 }

@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "core/input/MenuRepeat.h"
+#include "screens/MenuUi.h"
 #include "screens/Session.h"
 #include "screens/SongMedia.h"
 
@@ -81,8 +82,8 @@ private:
     float scroll_ = 0;        // drawn position, eases towards cursor_
     input::MenuRepeat wheel_up_, wheel_down_;
     u32 frames_ = 0;
-    u32 message_frame_ = 0;   // when session_.message was last set
-    u32 quit_frames_ = 0;
+    ui::Hint hint_;           // "Players are chosen on ...", the calibration's "offset saved"
+    ui::ExitChord exit_;
     bool picked_ = false;
     bool calibrate_ = false;
     bool back_ = false;

@@ -12,6 +12,7 @@
 #include <cstring>
 #include <string>
 
+#include "platform/wii/MenuSound.h"
 #include "platform/wii/WiiInput.h"
 #include "platform/wii/WiiVideo.h"
 #include "render/Draw.h"
@@ -116,6 +117,10 @@ SongSelect::SongSelect(wii::Video& video, const wii::Input& input, const render:
     buildItems();
     scroll_ = (float)cursor_;
     pickCharts();
+    if (!session_.message.empty()) {   // e.g. the calibration's "offset saved"
+        hint_.note(session_.message);
+        session_.message.clear();
+    }
 }
 
 void SongSelect::buildItems() {
@@ -181,10 +186,7 @@ void SongSelect::handleWheel() {
         if (!(input_.down(port) & (PAD_BUTTON_A | PAD_BUTTON_START))) continue;
         bool playing = false;
         for (const SessionPlayer& p : players) playing = playing || (p.port == port && !p.bot);
-        if (!playing) {
-            session_.message = "Players are chosen on the Players screen (B)";
-            message_frame_ = frames_;
-        }
+        if (!playing) hint_.say("Players are chosen on the Players screen");
     }
     if (down0 & PAD_TRIGGER_R) {   // the offset calibration screen (controller only)
         calibrate_ = true;
@@ -198,22 +200,38 @@ void SongSelect::handleWheel() {
         down |= input_.down(p.port);
         held |= input_.held(p.port);
     }
-    if (wheel_up_.update(down & PAD_BUTTON_UP, held & PAD_BUTTON_UP, now)) moveCursor(-1);
-    if (wheel_down_.update(down & PAD_BUTTON_DOWN, held & PAD_BUTTON_DOWN, now)) moveCursor(1);
     if (items_.empty()) return;
+    if (wheel_up_.update(down & PAD_BUTTON_UP, held & PAD_BUTTON_UP, now)) {
+        moveCursor(-1);
+        wii::sfx::move();
+    }
+    if (wheel_down_.update(down & PAD_BUTTON_DOWN, held & PAD_BUTTON_DOWN, now)) {
+        moveCursor(1);
+        wii::sfx::move();
+    }
 
     const Item it = items_[cursor_];
     if (down & PAD_BUTTON_RIGHT) {   // open the pack under the cursor
-        if (it.song < 0 && session_.open_pack != it.pack) setPackOpen(it.pack, true);
+        if (it.song < 0 && session_.open_pack != it.pack) {
+            setPackOpen(it.pack, true);
+            wii::sfx::move();
+        }
     } else if (down & PAD_BUTTON_LEFT) {   // close the open pack (from a song or its header)
-        if (it.song >= 0 || session_.open_pack == it.pack) setPackOpen(it.pack, false);
+        if (it.song >= 0 || session_.open_pack == it.pack) {
+            setPackOpen(it.pack, false);
+            wii::sfx::move();
+        }
     } else if (down & PAD_BUTTON_A) {
-        if (it.song < 0)
+        if (it.song < 0) {
             setPackOpen(it.pack, session_.open_pack != it.pack);
-        else if (session_.chosen() && !session_.chosen()->charts.empty())
+            wii::sfx::select();
+        } else if (session_.chosen() && !session_.chosen()->charts.empty()) {
             openPopup();
+            wii::sfx::select();
+        }
     } else if (down & PAD_BUTTON_B) {
         back_ = true;
+        wii::sfx::back();
     } else if (it.song >= 0 && session_.chosen() && !session_.chosen()->charts.empty()) {
         // Z opens the song's high scores on that player's chart (not START+Z, the exit chord).
         for (const SessionPlayer& p : players) {
@@ -235,12 +253,15 @@ void SongSelect::handleScores() {
     for (const SessionPlayer& p : session_.players) {
         if (p.bot) continue;
         const u16 d = input_.down(p.port);
-        if ((d & PAD_BUTTON_B) || ((d & PAD_TRIGGER_Z) && !(input_.held(p.port) & PAD_BUTTON_START))) {
+        if ((d & PAD_BUTTON_B) || ui::zPressed(input_, p.port)) {
+            if (d & PAD_BUTTON_B) wii::sfx::back();   // as in the prototype, Z has no sound
             scores_ = false;
             return;
         }
         const int dir = (d & PAD_BUTTON_LEFT) ? -1 : (d & PAD_BUTTON_RIGHT) ? 1 : 0;
-        scores_chart_ = std::max(0, std::min((int)s->charts.size() - 1, scores_chart_ + dir));
+        const int c = std::max(0, std::min((int)s->charts.size() - 1, scores_chart_ + dir));
+        if (c != scores_chart_) wii::sfx::move();
+        scores_chart_ = c;
     }
 }
 
@@ -268,6 +289,7 @@ void SongSelect::handlePopup() {
         if (p.bot) continue;
         const u16 d = input_.down(p.port), h = input_.held(p.port);
         if (d & PAD_BUTTON_B) {   // anyone's B closes it for everyone
+            wii::sfx::back();
             popup_ = false;
             for (SessionPlayer& q : players) q.ready = false;
             return;
@@ -276,16 +298,21 @@ void SongSelect::handlePopup() {
         const bool sp_left = speed_rep_[i][0].update(d & PAD_BUTTON_LEFT, h & PAD_BUTTON_LEFT, now);
         const bool sp_right = speed_rep_[i][1].update(d & PAD_BUTTON_RIGHT, h & PAD_BUTTON_RIGHT, now);
         if (p.ready) {   // arrows locked; A un-readies
-            if (d & PAD_BUTTON_A) p.ready = false;
+            if (d & PAD_BUTTON_A) {
+                p.ready = false;
+                wii::sfx::select();
+            }
             continue;
         }
         int& row = row_[i];
+        if (d & (PAD_BUTTON_UP | PAD_BUTTON_DOWN)) wii::sfx::move();
         if (d & PAD_BUTTON_UP) row = (row + kRows - 1) % kRows;
         if (d & PAD_BUTTON_DOWN) row = (row + 1) % kRows;
         const int dir = (d & PAD_BUTTON_LEFT) ? -1 : (d & PAD_BUTTON_RIGHT) ? 1 : 0;
         ddr::PortConfig& pc = session_.config.ports[p.port];
         if (row == 0 && dir) {   // the song's charts, easiest first
             const int c = std::max(0, std::min((int)s->charts.size() - 1, p.chart + dir));
+            if (c != p.chart) wii::sfx::move();
             p.chart = c;
             p.preferred = s->charts[c].difficulty;
             pickCharts();   // an autoplay P2 follows
@@ -294,15 +321,19 @@ void SongSelect::handlePopup() {
             if (sp != p.speed) {
                 p.speed = pc.scrollSpeed = sp;
                 session_.config_dirty = true;
+                wii::sfx::move();
             }
         } else if (row == 2 && dir) {   // Off, On, On no fail
             p.life_bar = (ddr::LifeBar)(((int)p.life_bar + dir + 3) % 3);
             pc.lifeBar = p.life_bar;
             session_.config_dirty = true;
+            wii::sfx::move();
         } else if (row == 3 && dir) {
             p.autoplay = !p.autoplay;
+            wii::sfx::move();
         }
         if (d & PAD_BUTTON_A) {
+            wii::sfx::select();
             if (row != kRows - 1) row = kRows - 1;
             else p.ready = true;
         }
@@ -314,7 +345,6 @@ void SongSelect::handlePopup() {
 
 bool SongSelect::frame() {
     frames_++;
-    if (frames_ - message_frame_ == 300) session_.message.clear();   // shown for about 5 s
     if (popup_)
         handlePopup();
     else if (scores_)
@@ -323,9 +353,8 @@ bool SongSelect::frame() {
         handleWheel();
     updateMedia();
     draw();
-    const u16 held = input_.held(0);
-    quit_frames_ = ((held & PAD_BUTTON_START) && (held & PAD_TRIGGER_Z)) ? quit_frames_ + 1 : 0;
-    return !picked_ && !calibrate_ && !back_ && quit_frames_ < 120;
+    const bool quit = exit_.update(input_);
+    return !picked_ && !calibrate_ && !back_ && !quit;
 }
 
 // Like ITG, wait until the cursor has rested on a row before loading its banner and preview,
@@ -372,10 +401,9 @@ void SongSelect::draw() {
     drawSongInfo(s);
     drawGrid(s);
     for (int i = 0; i < Session::kMaxPlayers; i++) drawPane(i, s);
-    if (!session_.message.empty())
-        font_.print(kLeftX, 436, 0xFFC040FF, 1, "%s", session_.message.c_str());
-    else
-        font_.print(kLeftX, 436, kGrey, 1, "Up/Down scroll  Right open  Left close  A select  Z scores  B back");
+    // The help strip's first line. The panes fill y 344-428, so it sits under them, alone.
+    if (!popup_ && !scores_)
+        font_.print(kLeftX, 436, kGrey, 1, "Up/Down scroll   Right open   Left close   A select   Z scores");
     if (!session_.scanned)
         font_.print(kLeftX, 200, 0xFF5050FF, 1, "can't open sd:/ddrwii/songs");
     else if (session_.library.packs.empty())
@@ -383,6 +411,7 @@ void SongSelect::draw() {
     GRRLIB_SetAntiAliasing(true);
     if (popup_) drawPopup(s);
     if (scores_) drawScores(s);
+    hint_.draw(font_);
 }
 
 void SongSelect::drawSongInfo(const ddr::SongEntry* s) {
@@ -543,8 +572,7 @@ void SongSelect::drawScores(const ddr::SongEntry* s) {
         font_.print(488, y, kGrey, 1, "%s", tag);
     }
     if (list) font_.print(64, 372, kGrey, 1, "%d plays, %d clears", list->plays, list->clears);
-    font_.print(64, 400, kGrey, 1, "Left/Right difficulty");
-    font_.print(64, 416, kGrey, 1, "B or Z close");
+    ui::help(font_, "Left/Right difficulty", "B or Z close");
     GRRLIB_SetAntiAliasing(true);
 }
 
@@ -612,9 +640,9 @@ void SongSelect::drawPopup(const ddr::SongEntry* s) {
     }
     bool any_ready = false;
     for (const SessionPlayer& p : players) any_ready = any_ready || (p.ready && !p.bot);
-    font_.print(64, 372, kGrey, 1, "Up/Down row   Left/Right change   A on Ready");
-    font_.print(64, 392, kGrey, 1, "%s", any_ready ? "A again un-readies   B back to the song list"
-                                                    : "B back to the song list");
+    ui::help(font_, any_ready ? "Up/Down row   Left/Right change   A on Ready   (A again un-readies)"
+                              : "Up/Down row   Left/Right change   A on Ready",
+             "B back to the song list");
     GRRLIB_SetAntiAliasing(true);
 }
 

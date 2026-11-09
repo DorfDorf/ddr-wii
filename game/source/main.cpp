@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// ddr-wii entry point. Loads config.ini, scans the song library, then boots into the Players
-// screen (1 or 2 players), then song select, which hands the picked song to gameplay, then the
-// results (name entry), then back to song select. B in song select goes back to Players; B on Players (until the
-// title screen exists) cycles through the M4b audio clock test, the M2b playfield stress test
-// and the M2 render test, and back.
+// ddr-wii entry point. Loads config.ini, scans the song library, then runs the target menu flow
+// (doc 06 §7): Title -> Players (1 or 2) -> song select -> gameplay -> results -> song select.
+// B goes back one level (song select -> Players -> Title). Options and the exit prompt open from
+// the title; the offset calibration opens from Options and with R in song select; the test
+// scenes (M4b audio clock, M2b playfield stress, M2 render) from Options. START+Z held for 2 s
+// exits from anywhere.
 #include <fat.h>
 #include <gccore.h>
 #include <ogc/lwp_watchdog.h>
 #include <stdlib.h>
 
+#include "platform/wii/MenuSound.h"
 #include "platform/wii/WiiInput.h"
 #include "platform/wii/WiiVideo.h"
 #include "render/ArrowArt.h"
@@ -16,12 +18,14 @@
 #include "screens/AudioClockTest.h"
 #include "screens/Gameplay.h"
 #include "screens/OffsetCalibration.h"
+#include "screens/Options.h"
 #include "screens/Players.h"
 #include "screens/PlayfieldStress.h"
 #include "screens/RenderTest.h"
 #include "screens/Results.h"
 #include "screens/Session.h"
 #include "screens/SongSelect.h"
+#include "screens/Title.h"
 
 namespace {
 
@@ -93,35 +97,95 @@ int main(int, char**) {
     if (session.scanned && cache.dirty && !ddr::SaveSongCache(kCachePath, cache))
         session.message = "Couldn't write sd:/ddrwii/cache.txt";
 
-    int which = 0;
-    bool in_song_select = false;   // else the Players screen
+    wii::sfx::init();   // the menu sounds, on ASND voice 1
+
+    enum class Scene { Title, Players, SongSelect, Options };
+    Scene scene = Scene::Title;
+    int title_row = screens::Title::kPlay;
+    bool players_from_title = true;
     for (;;) {
-        bool next;
-        if (which == 0 && !in_song_select) {
-            bool chosen;
+        if (scene == Scene::Title) {
+            screens::Title::Choice choice;
             {
-                screens::Players scene(video, input, font, session);
-                runScene(video, input, scene, false);
-                chosen = scene.chosen();
-                next = scene.back();
+                screens::Title title(video, input, art, font, session, title_row);
+                runScene(video, input, title, false);
+                choice = title.choice();
+            }
+            if (choice == screens::Title::Choice::Play) {
+                scene = Scene::Players;
+                players_from_title = true;
+            } else if (choice == screens::Title::Choice::Options) {
+                session.options_row = 1;
+                session.options_pads = false;
+                scene = Scene::Options;
+            } else {
+                break;   // Exit, or the exit chord
+            }
+        } else if (scene == Scene::Players) {
+            bool chosen, back;
+            {
+                screens::Players players(video, input, font, session, players_from_title);
+                runScene(video, input, players, false);
+                chosen = players.chosen();
+                back = players.back();
             }
             saveConfigIfChanged(session);
             if (chosen) {
-                in_song_select = true;
-                continue;
+                scene = Scene::SongSelect;
+            } else if (back) {
+                scene = Scene::Title;
+                title_row = screens::Title::kPlay;
+            } else {
+                break;   // the exit chord
             }
-        } else if (which == 0) {
+        } else if (scene == Scene::Options) {
+            screens::Options::Next next;
+            {
+                screens::Options options(video, input, font, session);
+                runScene(video, input, options, false);
+                next = options.next();
+            }
+            if (next == screens::Options::Next::None) {
+                saveConfigIfChanged(session);
+                break;   // the exit chord
+            }
+            if (next == screens::Options::Next::Back) {
+                saveConfigIfChanged(session);   // B saves config.ini
+                scene = Scene::Title;
+                title_row = screens::Title::kOptions;
+            } else if (next == screens::Options::Next::Calibrate) {
+                screens::OffsetCalibration cal(video, input, art, font, session);
+                runScene(video, input, cal, false);
+            } else {
+                // The test scenes in turn: B goes to the next, and from the last back to Options.
+                bool next_test = true;
+                {
+                    screens::AudioClockTest scene1(video, input, font);
+                    next_test = runScene(video, input, scene1);
+                }
+                if (next_test) {
+                    screens::PlayfieldStress scene2(video, input, art, font);
+                    next_test = runScene(video, input, scene2);
+                }
+                if (next_test) {
+                    screens::RenderTest scene3(video, input, art, font);
+                    next_test = runScene(video, input, scene3);
+                }
+                if (!next_test) break;   // the exit chord
+            }
+        } else {
             bool play, calibrate, back;
             {
-                screens::SongSelect scene(video, input, font, session);
-                runScene(video, input, scene, false);
-                play = scene.picked();
-                calibrate = scene.calibrate();
-                back = scene.back();
+                screens::SongSelect select(video, input, font, session);
+                runScene(video, input, select, false);
+                play = select.picked();
+                calibrate = select.calibrate();
+                back = select.back();
             }
             saveConfigIfChanged(session);
             if (back) {
-                in_song_select = false;
+                scene = Scene::Players;
+                players_from_title = false;
                 continue;
             }
             if (!play && !calibrate) break;   // the exit chord
@@ -130,40 +194,28 @@ int main(int, char**) {
                 runScene(video, input, cal, false);
                 continue;
             }
-            if (play) {
-                bool quit, done;
-                screens::SongResult result;
-                {
-                    screens::Gameplay game(video, input, art, font, session);
-                    runScene(video, input, game, false);
-                    quit = game.quitApp();
-                    done = game.finished();
-                    if (done) result = game.result();
-                }   // the song's audio stream is closed here
+            bool quit, done;
+            screens::SongResult result;
+            {
+                screens::Gameplay game(video, input, art, font, session);
+                runScene(video, input, game, false);
+                quit = game.quitApp();
+                done = game.finished();
+                if (done) result = game.result();
+            }   // the song's audio stream is closed here
+            saveScoresIfChanged(session);
+            if (quit) break;
+            if (done) {
+                screens::Results res(video, input, font, session, std::move(result));
+                runScene(video, input, res, false);
                 saveScoresIfChanged(session);
-                if (quit) break;
-                if (done) {
-                    screens::Results res(video, input, font, session, std::move(result));
-                    runScene(video, input, res, false);
-                    saveScoresIfChanged(session);
-                    saveConfigIfChanged(session);   // the last name per port
-                    if (res.quitApp()) break;
-                }
-                continue;   // back to song select
+                saveConfigIfChanged(session);   // the last name per port
+                if (res.quitApp()) break;
             }
-        } else if (which == 1) {
-            screens::AudioClockTest scene(video, input, font);
-            next = runScene(video, input, scene);
-        } else if (which == 2) {
-            screens::PlayfieldStress scene(video, input, art, font);
-            next = runScene(video, input, scene);
-        } else {
-            screens::RenderTest scene(video, input, art, font);
-            next = runScene(video, input, scene);
+            // back to song select
         }
-        if (!next) break;
-        which = (which + 1) % 4;
     }
+    saveConfigIfChanged(session);
 
     input.shutdown();
     font.destroy();

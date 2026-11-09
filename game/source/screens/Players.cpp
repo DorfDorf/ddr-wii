@@ -9,10 +9,12 @@
 #include <cstdio>
 #include <cstring>
 
+#include "platform/wii/MenuSound.h"
 #include "platform/wii/WiiInput.h"
 #include "platform/wii/WiiVideo.h"
 #include "render/Draw.h"
 #include "render/Font.h"
+#include "screens/MenuUi.h"
 
 namespace screens {
 namespace {
@@ -39,11 +41,13 @@ void padIcon(float x, float y, float size, u32 lit, u32 unlit) {
 
 }  // namespace
 
-Players::Players(wii::Video& video, const wii::Input& input, const render::Font& font, Session& session)
+Players::Players(wii::Video& video, const wii::Input& input, const render::Font& font, Session& session,
+                 bool from_title)
     : video_(video), input_(input), font_(font), session_(session) {
-    // Back from song select: the same lead, on the same choice; P2 joins again.
+    // The lead is whoever pressed Play on the title. Back from song select: the same lead, on
+    // the same choice; P2 joins again.
     lead_ = session_.lead_port;
-    choice_ = session_.players.size() > 1 ? 1 : 0;
+    choice_ = !from_title && session_.players.size() > 1 ? 1 : 0;
 }
 
 SessionPlayer Players::makePlayer(int port) const {
@@ -71,6 +75,7 @@ bool Players::secondPad() const {
 void Players::say(const char* text) {
     message_ = text;
     message_us_ = wii::Input::nowUs();
+    wii::sfx::error();
 }
 
 void Players::finish() {
@@ -89,6 +94,7 @@ void Players::handleInput() {
         if (lead_ < 0) {
             if (d & PAD_BUTTON_B) {
                 back_ = true;
+                wii::sfx::back();
                 return;
             }
             if (!(d & (kArrows | PAD_BUTTON_A | PAD_BUTTON_Y))) continue;
@@ -99,6 +105,7 @@ void Players::handleInput() {
             if ((d & PAD_BUTTON_A) && choice_ == 1 && !has_p2_) {
                 p2_ = makePlayer(port);
                 has_p2_ = true;
+                wii::sfx::select();
                 if (waiting_) finish();
             }
             continue;
@@ -110,11 +117,13 @@ void Players::handleInput() {
                 choice_ = 1 - choice_;
                 waiting_ = false;
                 if (choice_ == 0) has_p2_ = false;
+                wii::sfx::move();
             }
         }
         if (d & PAD_BUTTON_B) {
             if (waiting_) waiting_ = false;
             else back_ = true;
+            wii::sfx::back();
         }
         if ((d & PAD_BUTTON_Y) && !has_p2_) {   // an autoplay P2 on the first free port
             choice_ = 1;
@@ -125,6 +134,7 @@ void Players::handleInput() {
             if (waiting_) finish();
         }
         if ((d & PAD_BUTTON_A) && !chosen_) {
+            wii::sfx::select();
             if (choice_ == 0 || has_p2_) finish();
             else waiting_ = true;
         }
@@ -140,9 +150,8 @@ bool Players::frame() {
     frames_++;
     handleInput();
     draw();
-    const u16 held = input_.held(0);
-    quit_frames_ = ((held & PAD_BUTTON_START) && (held & PAD_TRIGGER_Z)) ? quit_frames_ + 1 : 0;
-    return !chosen_ && !back_ && quit_frames_ < 120;
+    const bool quit = exit_.update(input_);
+    return !chosen_ && !back_ && !quit;
 }
 
 void Players::draw() {
@@ -191,8 +200,7 @@ void Players::draw() {
     }
     if (!message_.empty() && wii::Input::nowUs() - message_us_ < kMessageUs)
         printCentred(font_, 320, 72, 0xFFC040FF, 1, message_.c_str());
-    font_.print(48, 400, kGrey, 1, "Left/Right choose   A select   B test scenes");
-    font_.print(48, 416, kGrey, 1, "Y autoplay P2   START+Z 2 s exit");
+    ui::help(font_, "Left/Right choose   A select   B back", "START+Z 2 s exit");
     GRRLIB_SetAntiAliasing(true);
 }
 

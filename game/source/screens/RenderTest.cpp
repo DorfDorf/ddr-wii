@@ -65,7 +65,7 @@ bool RenderTest::frame() {
     drawLanes(song_beat);
     drawOverlay();
 
-    // START+Z held for 2 s on port 1 exits (same as padtest).
+    // START+Z held for 2 s on port 1 exits.
     quit_frames_ = ((held_ & PAD_BUTTON_START) && (held_ & PAD_TRIGGER_Z)) ? quit_frames_ + 1 : 0;
     return quit_frames_ < 120;
 }
@@ -200,7 +200,7 @@ void RenderTest::drawOverlay() {
                     last_age_us_ / 1000.0f, max_age_us_ / 1000.0f);
     else
         font_.print(16, 426, grey, 1, "presses 0  (step on a panel)");
-    font_.print(16, 444, grey, 1, "A auto   L/R fewer/more sprites   B 2P/4P test   START+Z 2s exit");
+    font_.print(16, 444, grey, 1, "A auto   L/R fewer/more sprites   B back to Options   START+Z 2s exit");
 
     // Stress table, top right.
     GRRLIB_Rectangle(456, 8, 176, 18 * (kSteps + 1) + 8, 0x000000B0, true);

@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "platform/wii/MenuSound.h"
 #include "platform/wii/WiiInput.h"
 #include "platform/wii/WiiVideo.h"
 #include "render/Draw.h"
@@ -104,20 +105,42 @@ void Results::save(Column& c) {
 
 bool Results::frame() {
     const u64 now = wii::Input::nowUs();
-    const u16 held0 = input_.held(0);
-    quit_frames_ = ((held0 & PAD_BUTTON_START) && (held0 & PAD_TRIGGER_Z)) ? quit_frames_ + 1 : 0;
+    bool chord = false;   // START+Z on any pad
+    for (int port = 0; port < wii::Input::kPorts; port++) {
+        const u16 h = input_.held(port);
+        chord = chord || ((h & PAD_BUTTON_START) && (h & PAD_TRIGGER_Z));
+    }
+    quit_frames_ = chord ? quit_frames_ + 1 : 0;
 
     const bool naming_before = anyNaming();
     for (Column& c : cols_) {
         if (!c.naming) continue;
         const int port = c.r.port;
         const u16 d = input_.down(port), h = input_.held(port);
-        if (c.up.update(d & PAD_BUTTON_UP, h & PAD_BUTTON_UP, now)) changeLetter(c, 1);
-        if (c.down.update(d & PAD_BUTTON_DOWN, h & PAD_BUTTON_DOWN, now)) changeLetter(c, -1);
-        if ((d & PAD_BUTTON_LEFT) && c.pos > 0) c.pos--;
-        if ((d & PAD_BUTTON_RIGHT) && c.pos < 2) c.pos++;
-        if (d & PAD_BUTTON_A) hint_us_ = now;
-        if (startPressed(input_, port)) save(c);
+        if (c.up.update(d & PAD_BUTTON_UP, h & PAD_BUTTON_UP, now)) {
+            changeLetter(c, 1);
+            wii::sfx::move();
+        }
+        if (c.down.update(d & PAD_BUTTON_DOWN, h & PAD_BUTTON_DOWN, now)) {
+            changeLetter(c, -1);
+            wii::sfx::move();
+        }
+        if ((d & PAD_BUTTON_LEFT) && c.pos > 0) {
+            c.pos--;
+            wii::sfx::move();
+        }
+        if ((d & PAD_BUTTON_RIGHT) && c.pos < 2) {
+            c.pos++;
+            wii::sfx::move();
+        }
+        if (d & PAD_BUTTON_A) {
+            hint_us_ = now;
+            wii::sfx::error();
+        }
+        if (startPressed(input_, port)) {
+            save(c);
+            wii::sfx::select();
+        }
     }
     if (now - start_us_ >= kNameUs)
         for (Column& c : cols_)
@@ -133,6 +156,7 @@ bool Results::frame() {
     if (!naming_before) {
         for (const Column& c : cols_)
             if (!c.r.bot && (input_.down(c.r.port) & PAD_BUTTON_A)) done = true;
+        if (done) wii::sfx::select();
     }
 
     draw(now);

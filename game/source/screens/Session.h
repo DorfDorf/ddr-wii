@@ -45,7 +45,9 @@ struct Session {
     ddr::Config config;                     // config.ini: global offset, per-port input offsets
     bool config_loaded = false;             // false: no config.ini yet (defaults)
     bool config_dirty = false;              // changed since the last save (main.cpp saves it)
-    std::string message;                    // one-line note for song select (e.g. "offset saved")
+    std::string message;                    // one-line note for the next menu (e.g. "offset saved")
+    int options_row = 1;                    // Options keeps its place across calibration and tests
+    bool options_pads = false;              // ... and whether it was on the Pads page
     game::HighScoreTable scores;            // scores.txt: machine bests per chart
     bool scores_dirty = false;              // Gameplay recorded a play (main.cpp saves it)
 
