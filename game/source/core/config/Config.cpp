@@ -84,6 +84,12 @@ void ParseConfig(const std::string& text, Config& out) {
     if (GetNumber(ini, section, "InputOffset", d)) out.ports[p].inputOffsetS = ClampOffset(d / 1000.0);
     if (GetNumber(ini, section, "ScrollSpeed", d) && d >= 0.25 && d <= 8)
       out.ports[p].scrollSpeed = (int)(d * 4 + 0.5) / 4.0;   // steps of 0.25
+    if (ini.GetValue(section, "Name", s)) {
+      Trim(s);
+      MakeUpper(s);
+      if (s.size() == 3 && s.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ") == std::string::npos)
+        out.ports[p].name = s;
+    }
   }
 }
 
@@ -101,10 +107,11 @@ std::string WriteConfigText(const Config& c) {
   std::snprintf(buf, sizeof buf, "InputDebounceMs=%d\n", c.inputDebounceMs);
   t += buf;
   t += "\n; Per pad port. LifeBar: Off, On (ITG's bar and failing) or NoFail.\n";
+  t += "; Name: the last name saved on Results from this pad (three letters).\n";
   for (int p = 0; p < Config::kPorts; p++) {
-    std::snprintf(buf, sizeof buf, "\n[Port%d]\nInputOffset=%.1f\nScrollSpeed=%.2f\nLifeBar=%s\n", p + 1,
+    std::snprintf(buf, sizeof buf, "\n[Port%d]\nInputOffset=%.1f\nScrollSpeed=%.2f\nLifeBar=%s\nName=%s\n", p + 1,
                   c.ports[p].inputOffsetS * 1000.0, c.ports[p].scrollSpeed,
-                  LifeBarToString(c.ports[p].lifeBar));
+                  LifeBarToString(c.ports[p].lifeBar), c.ports[p].name.c_str());
     t += buf;
   }
   return t;

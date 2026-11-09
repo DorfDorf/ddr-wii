@@ -10,14 +10,15 @@
 // A player with the life bar On has ITG's bar (core/game/LifeMeter): if it empties they fail,
 // their playfield greys out and stops judging, and the song ends once everyone has failed
 // (doc 06 §11.4). With "On, no fail" the bar keeps moving after it empties (ITG's FailType
-// Off) and never fails them; with Off there's no bar. A/START on the results goes back to
-// song select.
+// Off) and never fails them; with Off there's no bar. Once the song is over, frame() returns
+// false with finished() set, and main.cpp shows screens/Results with result().
 // START from any player's pad pauses the song for everyone (doc 06 §7): the music, the song
 // clock, judging and autoplay stop. Anyone's START continues; only the player who paused moves
 // the cursor and picks Restart (the same song, players and settings, from the start) or Quit
 // (back to song select).
 // A song that plays out (or that everyone failed) records each human player's score in the
-// Session's high-score table; a quit song and autoplay players record nothing (doc 06 §7).
+// Session's high-score table, named with the port's last name (Results renames it); a quit
+// song and autoplay players record nothing (doc 06 §7).
 #pragma once
 
 #include <gctypes.h>
@@ -28,6 +29,7 @@
 #include "core/chart/Chart.h"
 #include "core/game/Judge.h"
 #include "core/game/LifeMeter.h"
+#include "screens/Results.h"
 #include "screens/Session.h"
 #include "core/timing/SongClock.h"
 #include "platform/wii/WiiAudio.h"
@@ -42,10 +44,12 @@ public:
     Gameplay(wii::Video& video, const wii::Input& input, const render::ArrowArt& art,
              const render::Font& font, Session& session);
 
-    // Runs one frame of logic + drawing (does not present). Returns false when done: back to
-    // song select, or quit the app if quitApp().
+    // Runs one frame of logic + drawing (does not present). Returns false when done: the song
+    // is over (finished(): show the results), it was quit, or quit the app if quitApp().
     bool frame();
     bool quitApp() const { return quit_frames_ >= 120; }
+    bool finished() const { return state_ == State::Done; }
+    const SongResult& result() const { return result_; }
 
 private:
     enum class State { Error, Playing, Done };
@@ -79,7 +83,6 @@ private:
         std::string score_key;      // game::ChartKey for this chart
         bool had_best = false;      // a best existed before this play
         game::HighScore prev_best;
-        bool new_best = false;
     };
 
     bool loadSong(const Session& session);
@@ -97,7 +100,6 @@ private:
     void drawPlayer(Player& p, double beat, u64 now_us);
     void drawLife(const Player& p);
     void drawHud(double chart_s);
-    void drawResults();
     void drawPause(u64 now_us);
     std::string playerLabel(const Player& p) const;
 
@@ -127,6 +129,7 @@ private:
     double end_s_ = 0;          // chart time when the song is over
     double chart_s_ = 0;
     u32 quit_frames_ = 0;
+    SongResult result_;         // filled by finish()
 };
 
 }  // namespace screens

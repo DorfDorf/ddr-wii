@@ -10,8 +10,12 @@
 //
 // The players come from the Players screen. Any player moves the wheel: Up/Down (held: repeat
 // after 0.4 s every 75 ms, every 35 ms after 2 s), Right opens a pack, Left closes it, A opens
-// a pack or the song settings popup, B goes back to Players. R on port 1 (controller) opens
-// the offset calibration. START+Z for 2 s exits.
+// a pack or the song settings popup, Z (on a song) the high scores, B goes back to Players.
+// R on port 1 (controller) opens the offset calibration. START+Z for 2 s exits.
+//
+// The high scores popup shows one chart's top 10 (rank, name, speed, %, grade and "no bar" /
+// "no fail" tags), starting on the chart of the player who pressed Z. Any player's Left/Right
+// steps through the song's charts; B or Z closes it.
 //
 // The popup has one column per player, each with their own cursor: Difficulty (the song's
 // charts; remembered from song to song), Speed (0.25x-8x, saved per port), Life bar (Off /
@@ -57,12 +61,14 @@ private:
     void handleWheel();
     void openPopup();
     void handlePopup();
+    void handleScores();
     void draw();
     void drawSongInfo(const ddr::SongEntry* s);
     void drawGrid(const ddr::SongEntry* s);
     void drawPane(int slot, const ddr::SongEntry* s);
     void drawWheel();
     void drawPopup(const ddr::SongEntry* s);
+    void drawScores(const ddr::SongEntry* s);
     void updateMedia();                // ask for the banner and preview once the cursor rests
 
     wii::Video& video_;
@@ -85,9 +91,12 @@ private:
     int row_[Session::kMaxPlayers] = {};
     input::MenuRepeat speed_rep_[Session::kMaxPlayers][2];   // Left, Right on the speed row
 
+    bool scores_ = false;              // the high scores popup is up
+    int scores_chart_ = 0;             // the chart it shows (index into SongEntry::charts)
+
     struct PaneBest {                  // drawPane's cached high-score lookup, per slot
         int pack = -2, song = -2, chart = -1;
-        const game::HighScoreEntry* entry = nullptr;
+        const game::ChartScores* entry = nullptr;
     };
     PaneBest pane_best_[Session::kMaxPlayers];
 
