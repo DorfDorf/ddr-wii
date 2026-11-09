@@ -194,6 +194,7 @@ What it shows:
   5. *Results and high scores (slice 3):* both players make the top 10 of one chart: each types a name with the mat's arrows and START, the waiting player's help line names who they're waiting for, and both names show in the Z popup in the right order.
   6. *Options (slice 4):* Test input lights every panel, START and Z on both mats (and shows "not connected" for empty ports); holding B 1 s leaves. Change "Ignore double presses" and check the arrows still feel normal in a song. Calibrate offset from Options (about 30 steps, A saves) comes back to Options with the new value; the per-port input offsets save. The three test scenes run from Options and B brings you back.
   7. *Sounds (slice 4):* the menu sounds are audible on the TV but quieter than a song preview, don't cut or crackle the preview when you scroll over songs, and nothing sounds during a song except START pausing.
+  **Seen once on hardware (2026-11-09, commit `7673460`, setup not recorded):** A on the Players screen (1 or 2 Players) froze the game with the Players screen still shown; a second try with nothing changed went to song select normally. Not reproduced in Dolphin, with the DSP in HLE or LLE. If it happens again, note what was on screen, whether the pink edge still pulsed, which pads were plugged in, and whether it was the first song select after boot.
   8. *Readability (slices 2–4):* the help strips (y 400–432; song select's at 436), the hint box at y 440–468 and the Test input grid are inside the visible picture and readable from the mat. |
 
 ---
