@@ -4,8 +4,8 @@
 // the Players screen.
 //
 // Exit opens a prompt over the title that defaults to No. Left/Right choose; START on Yes
-// exits, A on Yes only shows "Press START to exit ddr-wii" (exiting is irreversible, so it
-// takes START), A or START on No and B cancel. START+Z held for 2 s exits from anywhere.
+// exits, A on Yes only shows "Press START to exit Dance Dance Wiivolution" (exiting is
+// irreversible, so it takes START), A or START on No and B cancel. START+Z held for 2 s exits from anywhere.
 #pragma once
 
 #include <gctypes.h>

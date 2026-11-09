@@ -1,6 +1,6 @@
-# ddr-wii
+# Dance Dance Wiivolution
 
-A four-panel rhythm game (StepMania-style) for Nintendo Wii homebrew, played with a GameCube-port DDR dance pad. Developed and tested in Dolphin first, then on real hardware via the Homebrew Channel.
+A four-panel rhythm game (StepMania-style) for Nintendo Wii homebrew, played with a GameCube-port DDR dance pad. Developed and tested in Dolphin first, then on real hardware via the Homebrew Channel. The repository, the code and the SD card folders keep the working name `ddr-wii` (`sd:/ddrwii`).
 
 **Status:** in development. What's done, the hardware results and what's next are in the [roadmap (doc 05)](docs/05-development-roadmap.md).
 
