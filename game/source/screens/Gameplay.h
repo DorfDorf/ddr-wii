@@ -9,10 +9,15 @@
 // speed (ITG x-mod: 1x = 64 px per beat). Mines and rolls are judged (core/game/Judge).
 // A player with the life bar On has ITG's bar (core/game/LifeMeter): if it empties they fail,
 // their playfield greys out and stops judging, and the song ends once everyone has failed
-// (doc 06 §11.4). With "On, no fail" the bar is shown but can't fail them; with Off there's
-// no bar. START stops the song; A/START on the results goes back to song select.
+// (doc 06 §11.4). With "On, no fail" the bar keeps moving after it empties (ITG's FailType
+// Off) and never fails them; with Off there's no bar. A/START on the results goes back to
+// song select.
+// START from any player's pad pauses the song for everyone (doc 06 §7): the music, the song
+// clock, judging and autoplay stop. Anyone's START continues; only the player who paused moves
+// the cursor and picks Restart (the same song, players and settings, from the start) or Quit
+// (back to song select).
 // A song that plays out (or that everyone failed) records each human player's score in the
-// Session's high-score table; a stopped song and autoplay players record nothing (doc 06 §7).
+// Session's high-score table; a quit song and autoplay players record nothing (doc 06 §7).
 #pragma once
 
 #include <gctypes.h>
@@ -49,6 +54,7 @@ private:
         int port = 0;
         int chart = 0;              // index into song_.charts
         bool autoplay = false;
+        bool bot = false;           // Y's test P2: no pad, can't pause
         double input_offset_s = 0;  // config.ini [PortN] InputOffset
         double speed = 2.0;         // scroll speed (x-mod)
         ddr::LifeBar life_bar = ddr::LifeBar::Off;
@@ -80,6 +86,11 @@ private:
     void start();
     void stop(State next);
     void finish();              // the song played out: record the scores, then the results
+    void pause(int by, u64 now_us);
+    void resume(u64 now_us);
+    enum class PauseAction { None, Restart, Quit };
+    PauseAction pauseInput(u64 now_us);
+    bool startPressed(int port) const;   // START down, not the START+Z exit chord
     void layout();
     void handleEvents(double offset_us);
     void drainJudge(Player& p, u64 now_us);
@@ -87,6 +98,7 @@ private:
     void drawLife(const Player& p);
     void drawHud(double chart_s);
     void drawResults();
+    void drawPause(u64 now_us);
     std::string playerLabel(const Player& p) const;
 
     wii::Video& video_;
@@ -97,7 +109,11 @@ private:
     State state_ = State::Error;
     u64 all_failed_us_ = 0;     // when the last player failed (the song ends shortly after)
     Session& session_;
-    bool recorded_ = false;     // finish() saved the scores (false: stopped with START)
+    bool paused_ = false;       // the pause menu is up
+    int pause_by_ = 0;          // index into players_ of who paused
+    int pause_cursor_ = 0;      // 0 Continue, 1 Restart, 2 Quit
+    u64 pause_us_ = 0;          // when it paused
+    u64 hint_us_ = 0;           // "Press START to continue" shown since
     std::string error_;
     std::string song_dir_;
     std::string music_;        // file name in song_dir_

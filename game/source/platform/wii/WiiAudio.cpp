@@ -539,6 +539,7 @@ void AudioStream::stopFill() {
     stop_ = true;
     LWP_JoinThread((lwp_t)lwp_, nullptr);
     playing_ = false;
+    paused_ = false;   // ASND_SetVoice clears the voice's pause flag
 }
 
 bool AudioStream::restart(double start_s) {
@@ -575,6 +576,18 @@ void AudioStream::play() {
     g_active = true;
     IRQ_Restore(level);
     playing_ = true;
+}
+
+void AudioStream::pause() {
+    if (!playing_ || paused_) return;
+    ASND_PauseVoice(0, 1);
+    paused_ = true;
+}
+
+void AudioStream::resume() {
+    if (!playing_ || !paused_) return;
+    ASND_PauseVoice(0, 0);
+    paused_ = false;
 }
 
 void AudioStream::close() {

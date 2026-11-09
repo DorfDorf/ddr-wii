@@ -35,6 +35,16 @@ public:
     // kHoldUs after the last report, so a chart that outlasts its audio still plays out.
     void freeRun() { free_run_ = true; }
 
+    // The pause menu (doc 06 §7). pause() freezes now() at its value at cpu_us and ignores
+    // reports until resume(), which continues from that value. The paused audio's tick
+    // counter stops too (asndlib.c [src]), so song time picks up where it was. Reports from
+    // before cpu_us of resume() are dropped, and the first one after it re-anchors the map
+    // (without a jump back); until it arrives now() stays put, unless free-running, when the
+    // CPU clock carries on at once.
+    void pause(uint64_t cpu_us);
+    void resume(uint64_t cpu_us);
+    bool paused() const { return paused_; }
+
     bool started() const { return started_; }
     uint32_t snaps() const { return snaps_; }      // offset jumps after the first report
     double offsetUs() const { return offset_us_; }
@@ -42,6 +52,9 @@ public:
 private:
     bool started_ = false;
     bool free_run_ = false;
+    bool paused_ = false;
+    bool resync_ = false;        // resumed, waiting for the first report after resume_cpu_
+    uint64_t resume_cpu_ = 0;
     double offset_us_ = 0;
     uint64_t last_report_cpu_ = 0;
     int64_t last_now_ = 0;

@@ -54,6 +54,11 @@ public:
     // 0-255; applies now if playing, else from the next play().
     void setVolume(int volume);
     void play();
+    // The pause menu: ASND_PauseVoice. A paused voice's tick counter stops too (asndlib.c
+    // [src]), so the tick report's count picks up where it was on resume().
+    void pause();
+    void resume();
+    bool paused() const { return paused_; }
     void close();
     ~AudioStream() { close(); }
 
@@ -98,6 +103,7 @@ private:
     u32 lwp_ = 0;                // lwp_t
     volatile bool stop_ = false;
     bool playing_ = false;
+    bool paused_ = false;
     int volume_ = 255;
 };
 
