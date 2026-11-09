@@ -10,8 +10,9 @@
 // to one reader only, so both can't be used at once.
 //
 // Note: libogc 3.2.1's PAD_SetSamplingCallback never calls its callback (doc 04 §5), so the
-// handler is registered with SI_RegisterPollingHandler directly. If no samples arrive at all,
-// update() falls back to one PAD_Read per frame (frame-time timestamps).
+// handler is registered with SI_RegisterPollingHandler directly. If no samples have arrived
+// for half a second (none at all, or every pad unplugged), update() falls back to one PAD_Read
+// per frame (frame-time timestamps), which also re-probes the ports.
 #pragma once
 
 #include <gctypes.h>
@@ -69,7 +70,8 @@ private:
     input::LaneEvent events_[kMaxEvents];
     int event_count_ = 0;
     Stats stats_;
-    u32 updates_ = 0;
+    u32 last_irq_samples_ = 0;    // g_irq_samples at the last update() that saw a new sample
+    u64 last_irq_tick_ = 0;       // gettime() then
     u64 window_start_tick_ = 0;
     u32 window_samples_ = 0;
     u32 window_min_us_ = 0xFFFFFFFF, window_max_us_ = 0;

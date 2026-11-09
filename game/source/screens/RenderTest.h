@@ -5,6 +5,8 @@
 
 #include <gctypes.h>
 
+#include "screens/MenuUi.h"
+
 namespace wii { class Video; class Input; }
 namespace render { struct ArrowArt; class Font; }
 
@@ -50,7 +52,7 @@ private:
     u32 last_age_us_ = 0;      // how long before this frame's input update it was sampled
     u32 max_age_us_ = 0;
     u32 presses_ = 0;
-    u32 quit_frames_ = 0;
+    ui::ExitChord exit_;
 
     bool auto_ = true;
     int step_ = 0;

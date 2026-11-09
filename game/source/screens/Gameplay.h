@@ -101,7 +101,7 @@ private:
     void drawLife(const Player& p);
     void drawHud(double chart_s);
     void drawPause(u64 now_us);
-    std::string playerLabel(const Player& p) const;
+    void playerLabel(const Player& p, char* buf, size_t n) const;   // "P1 port 1 Hard 9"
 
     wii::Video& video_;
     const wii::Input& input_;

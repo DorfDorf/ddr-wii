@@ -9,6 +9,7 @@
 #include "platform/wii/WiiInput.h"
 #include "platform/wii/WiiVideo.h"
 #include "render/Font.h"
+#include "screens/MenuUi.h"
 
 namespace screens {
 namespace {
@@ -57,11 +58,16 @@ void AudioClockTest::start() {
 }
 
 bool AudioClockTest::frame() {
-    const u16 down = input_.down(0), held = input_.held(0);
+    u16 down = 0;   // any pad
+    bool restart = false;
+    for (int port = 0; port < wii::Input::kPorts; port++) {
+        down |= input_.down(port);
+        restart = restart || ui::startPressed(input_, port);
+    }
     if (down & PAD_BUTTON_A) {
         file_ = (file_ + 1) % kTrackCount;
         start();
-    } else if ((down & PAD_BUTTON_START) && !(held & PAD_TRIGGER_Z)) {
+    } else if (restart) {
         start();
     }
 
@@ -85,8 +91,7 @@ bool AudioClockTest::frame() {
     if (clock_.started()) measure(cpu, song_us);
     draw(song_us);
 
-    quit_frames_ = ((held & PAD_BUTTON_START) && (held & PAD_TRIGGER_Z)) ? quit_frames_ + 1 : 0;
-    return quit_frames_ < 120;
+    return !exit_.update(input_);   // START+Z held for 2 s on any pad exits
 }
 
 void AudioClockTest::bufferDiff(s64 d) {

@@ -25,16 +25,17 @@ SongMedia::SongMedia() {
     mutex_t m;
     LWP_MutexInit(&m, false);
     mutex_ = (u32)m;
-    lwp_t t;
+    lwp_t t = LWP_THREAD_NULL;
     // Below the main thread (64), so decoding never holds up a frame; the audio fill thread
-    // AudioStream starts is at 80.
-    LWP_CreateThread(&t, run, this, nullptr, 64 * 1024, 40);
+    // AudioStream starts is at 80. If the thread can't be created, the wheel still works,
+    // without banners or previews.
+    if (LWP_CreateThread(&t, run, this, nullptr, 64 * 1024, 40) != 0) t = LWP_THREAD_NULL;
     lwp_ = (u32)t;
 }
 
 SongMedia::~SongMedia() {
     quit_ = true;
-    LWP_JoinThread((lwp_t)lwp_, nullptr);
+    if (lwp_ != (u32)LWP_THREAD_NULL) LWP_JoinThread((lwp_t)lwp_, nullptr);
     LWP_MutexDestroy((mutex_t)mutex_);
     if (ready_) GRRLIB_FreeTexture(ready_);
     if (shown_) GRRLIB_FreeTexture(shown_);

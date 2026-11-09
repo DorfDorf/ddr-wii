@@ -9,6 +9,7 @@
 
 #include "core/timing/SongClock.h"
 #include "platform/wii/WiiAudio.h"
+#include "screens/MenuUi.h"
 
 namespace wii { class Video; class Input; }
 namespace render { class Font; }
@@ -55,7 +56,7 @@ private:
     s64 drift_min_us_ = 0, drift_max_us_ = 0;   // drift from the reference, since it was set
     u64 second_start_us_ = 0;
     u32 seconds_ = 0;
-    u32 quit_frames_ = 0;
+    ui::ExitChord exit_;
 };
 
 }  // namespace screens

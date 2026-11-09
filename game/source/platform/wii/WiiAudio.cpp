@@ -41,22 +41,25 @@ volatile u32 g_ring_min = N;
 
 // ---- Sources: something that produces 16-bit PCM frames ----
 
-// OGG and MP3 files are read whole into one fixed buffer at the top of MEM2, reserved the
-// first time it's needed and reused for every song (doc 05 M4c open item 5): no multi-MB
-// malloc/free per song, so repeated song loads can't fragment the heap. One file at a time.
+// OGG and MP3 files are read whole into one fixed buffer at the top of MEM2, reserved once at
+// boot (initAsnd, called from main before any other thread exists) and reused for every song
+// (doc 05 M4c open item 5): no multi-MB malloc/free per song, so repeated song loads can't
+// fragment the heap. One file at a time.
 constexpr u32 kFileBufBytes = 24u << 20;
 u8* g_file_buf = nullptr;
 
+void reserveFileBuffer() {
+    if (g_file_buf) return;
+    const u32 lo = (u32)SYS_GetArena2Lo(), hi = (u32)SYS_GetArena2Hi();
+    const u32 p = (hi - kFileBufBytes) & ~31u;
+    if (hi > kFileBufBytes && p >= lo) {
+        SYS_SetArena2Hi((void*)p);
+        g_file_buf = (u8*)p;
+    }
+}
+
 // Reads all of f (and closes it) into the file buffer, followed by `guard` zero bytes.
 const char* readWhole(FILE* f, u8*& data, size_t& size, size_t guard) {
-    if (!g_file_buf) {
-        const u32 lo = (u32)SYS_GetArena2Lo(), hi = (u32)SYS_GetArena2Hi();
-        const u32 p = (hi - kFileBufBytes) & ~31u;
-        if (hi > kFileBufBytes && p >= lo) {
-            SYS_SetArena2Hi((void*)p);
-            g_file_buf = (u8*)p;
-        }
-    }
     fseek(f, 0, SEEK_END);
     const long len = ftell(f);
     fseek(f, 0, SEEK_SET);
@@ -404,6 +407,7 @@ void AudioStream::initAsnd() {
     ASND_Init();
     ASND_SetCallback(tickCallback);
     ASND_Pause(0);
+    reserveFileBuffer();
     done = true;
 }
 
@@ -422,6 +426,7 @@ void AudioStream::voiceCallback(s32 voice) {
         g_report_count = g_report_count + 1;
     }
     if (g_queued - g_finished < 2 && g_filled > g_queued) {
+        __asm__ __volatile__("" ::: "memory");   // the chunk's length only after the index
         const u32 i = g_queued % N;
         if (ASND_AddVoice(voice, g_buf[i], g_bytes[i]) == SND_OK) {
             g_queued = g_queued + 1;
@@ -452,6 +457,7 @@ void AudioStream::fillOnce() {
         DCFlushRange(g_buf[i], padded);   // the DSP reads main memory, not the CPU cache
         g_bytes[i] = padded;
         g_frames[i] = got;
+        __asm__ __volatile__("" ::: "memory");   // lengths before the index; volatile alone doesn't order them
         g_filled = g_filled + 1;          // publish after the data is in memory
         if (got < kChunkFrames) g_eof = true;
     }
@@ -506,11 +512,16 @@ bool AudioStream::open(const char* path, double start_s) {
     start_delay_frames_ = src->start_delay_frames;
     start_delay_known_ = src->start_delay_known;
     error_ = "";
-    startFill();
+    if (!startFill()) {
+        delete src;
+        source_ = nullptr;
+        error_ = "couldn't start the audio thread";
+        return false;
+    }
     return true;
 }
 
-void AudioStream::startFill() {
+bool AudioStream::startFill() {
     frames_read_ = 0;
     read_max_us_ = 0;
     decode_us_ = 0;
@@ -528,16 +539,20 @@ void AudioStream::startFill() {
 
     fillOnce();   // preload the whole ring before playing
     stop_ = false;
-    lwp_t t;
-    LWP_CreateThread(&t, fillThread, this, nullptr, 16 * 1024, 80);   // high priority; it mostly sleeps
+    // 64 KB of stack: libmad and Tremor keep several KB of arrays on it, and the interrupt
+    // handlers (SI poll, ASND) run on whatever stack is current. High priority; it mostly sleeps.
+    lwp_t t = LWP_THREAD_NULL;
+    if (LWP_CreateThread(&t, fillThread, this, nullptr, 64 * 1024, 80) != 0) t = LWP_THREAD_NULL;
     lwp_ = (u32)t;
+    return lwp_ != (u32)LWP_THREAD_NULL;
 }
 
 void AudioStream::stopFill() {
     g_active = false;
     ASND_StopVoice(0);
     stop_ = true;
-    LWP_JoinThread((lwp_t)lwp_, nullptr);
+    if (lwp_ != (u32)LWP_THREAD_NULL) LWP_JoinThread((lwp_t)lwp_, nullptr);
+    lwp_ = (u32)LWP_THREAD_NULL;
     playing_ = false;
     paused_ = false;   // ASND_SetVoice clears the voice's pause flag
 }
@@ -550,7 +565,10 @@ bool AudioStream::restart(double start_s) {
         error_ = "can't seek to the start time";
         return false;
     }
-    startFill();
+    if (!startFill()) {
+        error_ = "couldn't start the audio thread";
+        return false;
+    }
     return true;
 }
 

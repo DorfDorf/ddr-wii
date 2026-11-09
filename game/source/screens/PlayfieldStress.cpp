@@ -10,6 +10,7 @@
 #include "render/ArrowArt.h"
 #include "render/Draw.h"
 #include "render/Font.h"
+#include "screens/MenuUi.h"
 
 namespace screens {
 namespace {
@@ -71,13 +72,16 @@ bool PlayfieldStress::frame() {
     scene_pixels_ = c.pixels;
     drawOverlay();
 
-    quit_frames_ = ((held_ & PAD_BUTTON_START) && (held_ & PAD_TRIGGER_Z)) ? quit_frames_ + 1 : 0;
-    return quit_frames_ < 120;
+    return !exit_.update(input_);   // START+Z held for 2 s on any pad exits
 }
 
 void PlayfieldStress::handleInput() {
-    held_ = input_.held(0);
-    const u16 down = input_.down(0);
+    held_ = 0;   // any pad
+    u16 down = 0;
+    for (int port = 0; port < wii::Input::kPorts; port++) {
+        held_ |= input_.held(port);
+        down |= input_.down(port);
+    }
     if (down & PAD_BUTTON_A) auto_ = !auto_;
     int manual = 0;
     if (down & PAD_TRIGGER_R) manual = 1;

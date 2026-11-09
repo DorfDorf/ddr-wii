@@ -183,7 +183,7 @@ void SongSelect::handleWheel() {
 
     // A port that isn't playing: the players are set on the Players screen, nowhere else.
     for (int port = 0; port < wii::Input::kPorts; port++) {
-        if (!(input_.down(port) & (PAD_BUTTON_A | PAD_BUTTON_START))) continue;
+        if (!(input_.down(port) & PAD_BUTTON_A) && !ui::startPressed(input_, port)) continue;
         bool playing = false;
         for (const SessionPlayer& p : players) playing = playing || (p.port == port && !p.bot);
         if (!playing) hint_.say("Players are chosen on the Players screen");
