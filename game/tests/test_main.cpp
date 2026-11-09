@@ -1350,7 +1350,8 @@ static void TestConfig(const std::string& dir) {
   Config c;
   ParseConfig("[Options]\r\nGlobalOffset= -12.5 \r\nDefaultSyncOffset=itg\r\nInputDebounceMs=10\r\n"
               "PlayMode=competitive\r\n[Port2]\r\nInputOffset=4\r\nScrollSpeed=3.3\r\nLifeBar=nofail\r\n"
-              "[Port3]\r\nLifeBar=Off\r\n", c);
+              "[Port3]\r\nLifeBar=Off\r\nName= bob \r\n[Port4]\r\nName=TOOLONG\r\n", c);
+  CHECK(c.ports[2].name == "BOB" && c.ports[3].name == "AAA" && c.ports[0].name == "AAA");
   // The old PlayMode=Competitive turns the bar on where a port has no LifeBar of its own.
   CHECK(c.ports[0].lifeBar == LifeBar::On && c.ports[3].lifeBar == LifeBar::On);
   CHECK(c.ports[1].lifeBar == LifeBar::NoFail && c.ports[2].lifeBar == LifeBar::Off);
@@ -1381,6 +1382,7 @@ static void TestConfig(const std::string& dir) {
         e.ports[2].lifeBar == LifeBar::Off);
   CHECK(WriteConfigText(c).find("PlayMode") == std::string::npos);   // the old key is dropped
   CHECK_NEAR(e.ports[1].scrollSpeed, 3.25, 1e-9);
+  CHECK(e.ports[2].name == "BOB" && e.ports[1].name == "AAA");
 
   // Save twice over the same file (the second rename replaces the first file), then load.
   const std::string path = dir + "/build/config-test.ini";
@@ -1491,9 +1493,22 @@ static void TestScoresAndGrades(const std::string& dir) {
   CHECK(std::string(game::GradeTierName(game::GradeTier(10000, true))) == "F");
 
   // Better: passed before failed, then the higher %.
-  HighScore pass{7000, false, 10}, fail{9000, true, 50}, high{7100, false, 5};
+  auto hs = [](int pct, bool failed, int combo = 0, const char* name = "---",
+               ddr::LifeBar bar = ddr::LifeBar::On, double speed = 2.0) {
+    HighScore s;
+    s.percent_x100 = pct;
+    s.failed = failed;
+    s.max_combo = combo;
+    s.name = name;
+    s.life_bar = bar;
+    s.speed = speed;
+    return s;
+  };
+  const HighScore pass = hs(7000, false, 10), fail = hs(9000, true, 50), high = hs(7100, false, 5);
   CHECK(game::Better(pass, fail) && !game::Better(fail, pass));
   CHECK(game::Better(high, pass) && !game::Better(pass, pass));
+  CHECK(game::ValidName("ABC") && !game::ValidName("AB") && !game::ValidName("abc") &&
+        !game::ValidName("---") && !game::ValidName("A C"));
 
   // Keys name the song by its last two folders.
   ddr::SongEntry song;
@@ -1506,27 +1521,66 @@ static void TestScoresAndGrades(const std::string& dir) {
   song.dir = "C:/elsewhere/songs/My Pack/My Song/";
   CHECK(game::ChartKey(song, chart) == key);
 
+  // Ordering: a pass beats a fail, then the higher %; a new score wins a tie.
   game::HighScoreTable t;
-  CHECK(t.submit(key, fail));            // first play: the best, even failed
-  CHECK(t.submit(key, pass));            // a pass beats a failed 90%
-  CHECK(!t.submit(key, HighScore{6000, false, 99}));
-  CHECK(t.find(key)->best.percent_x100 == 7000 && t.find(key)->best.max_combo == 10);
-  CHECK(t.find(key)->plays == 3 && t.find(key)->clears == 2);
+  const uint32_t id_fail = t.submit(key, fail);
+  CHECK(id_fail && t.rank(key, id_fail) == 0);           // first play: the best, even failed
+  const uint32_t id_pass = t.submit(key, pass);
+  CHECK(t.rank(key, id_pass) == 0 && t.rank(key, id_fail) == 1);   // a pass beats a failed 90%
+  const uint32_t id_low = t.submit(key, hs(6000, false, 99, "LOW"));
+  CHECK(t.rank(key, id_low) == 1 && t.rank(key, id_fail) == 2);
+  const uint32_t id_tie = t.submit(key, hs(7000, false, 3, "TIE"));
+  CHECK(t.rank(key, id_tie) == 0 && t.rank(key, id_pass) == 1);
+  CHECK(t.find(key)->best()->name == "TIE" && t.find(key)->best()->max_combo == 3);
+  CHECK(t.find(key)->plays == 4 && t.find(key)->clears == 3);
+  CHECK(t.setName(key, id_pass, "BOB") && t.find(key)->top[1].name == "BOB");
+  CHECK(!t.setName(key, 9999, "BOB") && !t.setName("nope", id_pass, "BOB"));
+  CHECK(t.rank(key, 0) == -1 && t.find("nope") == nullptr);
+
+  // The top-10 cut: an entry pushed off loses its rank; a score below a full list isn't kept
+  // but still counts as a play.
   chart.difficulty = ddr::Difficulty::Hard;
   chart.description.clear();
   const std::string key2 = game::ChartKey(song, chart);
-  CHECK(t.submit(key2, HighScore{10000, false, 300}));
-  CHECK(t.find("nope") == nullptr);
+  uint32_t ids[10];
+  for (int i = 0; i < 10; i++) ids[i] = t.submit(key2, hs(5000 + i * 100, false, i, "AAA"));
+  CHECK(t.find(key2)->top.size() == 10 && t.rank(key2, ids[9]) == 0 && t.rank(key2, ids[0]) == 9);
+  CHECK(t.submit(key2, hs(4000, false)) == 0);                       // below the 10th
+  CHECK(t.submit(key2, hs(9999, true)) == 0);                        // a fail below 10 passes
+  const uint32_t id_top = t.submit(key2, hs(10000, false, 300, "ACE", ddr::LifeBar::NoFail, 3.25));
+  CHECK(t.rank(key2, id_top) == 0 && t.rank(key2, ids[0]) == -1 && t.rank(key2, ids[1]) == 9);
+  CHECK(!t.setName(key2, ids[0], "OFF"));
+  CHECK(t.find(key2)->top.size() == 10 && t.find(key2)->plays == 13 && t.find(key2)->clears == 12);
+  const uint32_t id_eq10 = t.submit(key2, hs(5100, false));         // ties the 10th: wins it
+  CHECK(t.rank(key2, id_eq10) == 9 && t.rank(key2, ids[1]) == -1);
 
-  // Write, read back; junk lines are skipped.
+  // Round trip: lists, order (ties too), names, life bars, speeds, plays and clears.
   game::HighScoreTable u;
-  u.parse(t.write() + "junk\nA/B\tHard\t\t100\t0\t1\t0\t0\n"
-          "A/B\tNotADifficulty\t\t100\t0\t1\t1\t1\r\n");
-  CHECK(u.size() == 2);
+  u.parse(t.write());
+  CHECK(u.size() == 2 && u.write() == t.write());
+  const game::ChartScores* c1 = u.find(key);
+  CHECK(c1 && c1->top.size() == 4 && c1->plays == 4 && c1->clears == 3);
+  CHECK(c1 && c1->top[0].name == "TIE" && c1->top[1].name == "BOB" && c1->top[3].failed &&
+        c1->top[3].percent_x100 == 9000 && c1->top[3].tier() == 0);
+  const game::ChartScores* c2 = u.find(key2);
+  CHECK(c2 && c2->top[0].name == "ACE" && c2->top[0].life_bar == ddr::LifeBar::NoFail &&
+        std::fabs(c2->top[0].speed - 3.25) < 1e-9 && c2->top[0].max_combo == 300 && c2->top[0].id == 0);
   CHECK(t.write().find("Casual") == std::string::npos);
 
-  // Old files had a play mode in front: still read, and a chart's two modes are merged
-  // (the better best, plays and clears added). A new-format line for the chart wins.
+  // Junk is skipped: bad tags, difficulties, life bars, %, field counts; a bad name is "---".
+  game::HighScoreTable j;
+  j.parse("junk\nA/B\tHard\t\t100\t0\t1\t0\t0\n"
+          "A/B\tNotADifficulty\t\t100\t0\t1\t1\t1\r\n"
+          "score\tA/B\tHard\t\tABC\t100\t0\t1\tMaybe\t2.00\n"
+          "score\tA/B\tHard\t\tABC\t20000\t0\t1\tOn\t2.00\n"
+          "score\tAB\tHard\t\tABC\t100\t0\t1\tOn\t2.00\n"
+          "chart\tA/B\tHard\t\t1\n"
+          "score\tA/C\tHard\t\tab\t100\t0\t1\tOff\t1.50\n");
+  CHECK(j.size() == 1 && j.find("A/C\tHard\t") && j.find("A/C\tHard\t")->best()->name == "---");
+  CHECK(j.find("A/C\tHard\t")->plays == 1 && j.find("A/C\tHard\t")->clears == 1);   // no chart line
+
+  // The two older formats: each line becomes a nameless entry, plays and clears added up.
+  // Casual had no bar, Competitive had it on; the one-best lines are taken as On.
   game::HighScoreTable o;
   o.parse("# old\nCasual\tP/S\tEasy\t\t9500\t0\t40\t3\t3\n"
           "Competitive\tP/S\tEasy\t\t9700\t1\t80\t2\t0\r\n"
@@ -1535,17 +1589,18 @@ static void TestScoresAndGrades(const std::string& dir) {
           "P/T\tHard\t\t6000\t0\t20\t4\t4\n"
           "Bogus\tP/S\tEasy\t\t100\t0\t1\t1\t1\n");
   CHECK(o.size() == 3);
-  const game::HighScoreEntry* m = o.find("P/S\tEasy\t");
-  CHECK(m && m->best.percent_x100 == 9500 && !m->best.failed && m->best.max_combo == 40);
-  CHECK(m && m->plays == 5 && m->clears == 3);
-  CHECK(o.find("P/S\tHard\t") && o.find("P/S\tHard\t")->plays == 1);
-  CHECK(o.find("P/T\tHard\t") && o.find("P/T\tHard\t")->best.percent_x100 == 6000);
+  const game::ChartScores* m = o.find("P/S\tEasy\t");
+  CHECK(m && m->top.size() == 2 && m->plays == 5 && m->clears == 3);
+  CHECK(m && m->top[0].percent_x100 == 9500 && m->top[0].life_bar == ddr::LifeBar::Off &&
+        m->top[0].name == "---" && m->top[0].speed == 0 && m->top[0].max_combo == 40);
+  CHECK(m && m->top[1].failed && m->top[1].life_bar == ddr::LifeBar::On);
+  const game::ChartScores* pt = o.find("P/T\tHard\t");
+  CHECK(pt && pt->top.size() == 2 && pt->plays == 5 && pt->top[0].percent_x100 == 8000 &&
+        pt->top[1].percent_x100 == 6000 && pt->top[1].life_bar == ddr::LifeBar::On);
   game::HighScoreTable o2;   // and it writes out in the new format
   o2.parse(o.write());
-  CHECK(o2.size() == 3 && o2.find("P/S\tEasy\t")->plays == 5);
-  CHECK(u.find(key) && u.find(key)->best.percent_x100 == 7000 && u.find(key)->plays == 3);
-  CHECK(u.find(key2) && u.find(key2)->best.percent_x100 == 10000 &&
-        u.find(key2)->best.max_combo == 300 && !u.find(key2)->best.failed);
+  CHECK(o2.size() == 3 && o2.find("P/S\tEasy\t")->plays == 5 && o2.write() == o.write());
+  CHECK(o.write().find("Competitive") == std::string::npos);
 
   const std::string path = dir + "/build/scores-test.txt";
   std::remove(path.c_str());
@@ -1554,7 +1609,7 @@ static void TestScoresAndGrades(const std::string& dir) {
   CHECK(game::SaveHighScores(path, t));
   CHECK(game::SaveHighScores(path, t));
   game::HighScoreTable v;
-  CHECK(game::LoadHighScores(path, v) && v.size() == 2);
+  CHECK(game::LoadHighScores(path, v) && v.size() == 2 && v.write() == t.write());
   std::remove(path.c_str());
 }
 

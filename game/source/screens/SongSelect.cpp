@@ -214,6 +214,33 @@ void SongSelect::handleWheel() {
             openPopup();
     } else if (down & PAD_BUTTON_B) {
         back_ = true;
+    } else if (it.song >= 0 && session_.chosen() && !session_.chosen()->charts.empty()) {
+        // Z opens the song's high scores on that player's chart (not START+Z, the exit chord).
+        for (const SessionPlayer& p : players) {
+            if (p.bot || !(input_.down(p.port) & PAD_TRIGGER_Z) || (input_.held(p.port) & PAD_BUTTON_START))
+                continue;
+            scores_ = true;
+            scores_chart_ = p.chart;
+            break;
+        }
+    }
+}
+
+void SongSelect::handleScores() {
+    const ddr::SongEntry* s = session_.chosen();
+    if (!s || s->charts.empty()) {
+        scores_ = false;
+        return;
+    }
+    for (const SessionPlayer& p : session_.players) {
+        if (p.bot) continue;
+        const u16 d = input_.down(p.port);
+        if ((d & PAD_BUTTON_B) || ((d & PAD_TRIGGER_Z) && !(input_.held(p.port) & PAD_BUTTON_START))) {
+            scores_ = false;
+            return;
+        }
+        const int dir = (d & PAD_BUTTON_LEFT) ? -1 : (d & PAD_BUTTON_RIGHT) ? 1 : 0;
+        scores_chart_ = std::max(0, std::min((int)s->charts.size() - 1, scores_chart_ + dir));
     }
 }
 
@@ -290,6 +317,8 @@ bool SongSelect::frame() {
     if (frames_ - message_frame_ == 300) session_.message.clear();   // shown for about 5 s
     if (popup_)
         handlePopup();
+    else if (scores_)
+        handleScores();
     else
         handleWheel();
     updateMedia();
@@ -346,13 +375,14 @@ void SongSelect::draw() {
     if (!session_.message.empty())
         font_.print(kLeftX, 436, 0xFFC040FF, 1, "%s", session_.message.c_str());
     else
-        font_.print(kLeftX, 436, kGrey, 1, "Up/Down scroll  Right open  Left close  A select  B back");
+        font_.print(kLeftX, 436, kGrey, 1, "Up/Down scroll  Right open  Left close  A select  Z scores  B back");
     if (!session_.scanned)
         font_.print(kLeftX, 200, 0xFF5050FF, 1, "can't open sd:/ddrwii/songs");
     else if (session_.library.packs.empty())
         font_.print(kLeftX, 200, 0xFF5050FF, 1, "no songs in sd:/ddrwii/songs");
     GRRLIB_SetAntiAliasing(true);
     if (popup_) drawPopup(s);
+    if (scores_) drawScores(s);
 }
 
 void SongSelect::drawSongInfo(const ddr::SongEntry* s) {
@@ -465,17 +495,57 @@ void SongSelect::drawPane(int slot, const ddr::SongEntry* s) {
         pb.chart = p.chart;
         pb.entry = session_.scores.find(game::ChartKey(*s, *c));
     }
-    const game::HighScoreEntry* best = pb.entry;
+    const game::HighScore* best = pb.entry ? pb.entry->best() : nullptr;
     if (best) {
-        std::snprintf(buf, sizeof buf, "%.2f%%", best->best.percent_x100 / 100.0);
+        std::snprintf(buf, sizeof buf, "%.2f%%", best->percent_x100 / 100.0);
     } else {
         std::snprintf(buf, sizeof buf, "--");
     }
     font_.print(x + kPaneW - 8 - std::strlen(buf) * kGlyph, y + 30, kBlack, 1, "%s", buf);
-    if (best) {
-        const char* g = game::GradeTierName(best->best.tier());
-        font_.print(x + kPaneW - 8 - std::strlen(g) * kGlyph, y + 48, kBlack, 1, "%s", g);
+    if (best) {   // the name and grade under it
+        std::snprintf(buf, sizeof buf, "%s  %s", best->name.c_str(), game::GradeTierName(best->tier()));
+        font_.print(x + kPaneW - 8 - std::strlen(buf) * kGlyph, y + 48, kBlack, 1, "%s", buf);
     }
+}
+
+// The high scores popup (the prototype's): the chart's top 10, a row each with rank, name,
+// speed, %, grade (F in red) and a "no bar" / "no fail" tag.
+void SongSelect::drawScores(const ddr::SongEntry* s) {
+    if (!s || scores_chart_ >= (int)s->charts.size()) return;
+    const ddr::ChartInfo& c = s->charts[scores_chart_];
+    const game::ChartScores* list = session_.scores.find(game::ChartKey(*s, c));
+    const int n = list ? (int)list->top.size() : 0;
+
+    render::rect(0, 0, video_.width(), video_.height(), 0x00000099);
+    render::rect(48, 56, 544, 380, kBox);
+    render::rect(48, 56, 544, 4, kPlayerColour[0]);
+    for (int k = 0; k < n; k++) render::rect(64, 125 + k * 22, 512, 20, k % 2 ? kBox : kDark);
+
+    GRRLIB_SetAntiAliasing(false);
+    font_.print(64, 68, kWhite, 1, "HIGH SCORES");
+    printFit(font_, 576 - std::min((int)s->title.size(), 40) * kGlyph, 68, kGrey, 1, s->title, 40);
+    char buf[48];
+    std::snprintf(buf, sizeof buf, "%s %s %d %s", scores_chart_ > 0 ? "<" : " ",
+                  ddr::DifficultyToString(c.difficulty), c.meter,
+                  scores_chart_ + 1 < (int)s->charts.size() ? ">" : " ");
+    printCentred(font_, 320, 92, difficultyColour(c.difficulty), 1, buf, 40);
+    if (!n) printCentred(font_, 320, 210, kGrey, 1, "No scores yet", 20);
+    for (int k = 0; k < n; k++) {
+        const game::HighScore& e = list->top[k];
+        const float y = 128 + k * 22;
+        font_.print(80, y, kGrey, 1, "%2d.", k + 1);
+        font_.print(128, y, k == 0 ? 0xFFE060FF : kWhite, 1, "%s", e.name.c_str());
+        if (e.speed > 0) font_.print(192, y, kGrey, 1, "%.2fx", e.speed);
+        std::snprintf(buf, sizeof buf, "%.2f%%", e.percent_x100 / 100.0);
+        font_.print(400 - std::strlen(buf) * kGlyph, y, kWhite, 1, "%s", buf);
+        font_.print(432, y, e.failed ? 0xFF4040FF : kWhite, 1, "%s", game::GradeTierName(e.tier()));
+        const char* tag = e.life_bar == ddr::LifeBar::Off ? "no bar" : e.life_bar == ddr::LifeBar::NoFail ? "no fail" : "";
+        font_.print(488, y, kGrey, 1, "%s", tag);
+    }
+    if (list) font_.print(64, 372, kGrey, 1, "%d plays, %d clears", list->plays, list->clears);
+    font_.print(64, 400, kGrey, 1, "Left/Right difficulty");
+    font_.print(64, 416, kGrey, 1, "B or Z close");
+    GRRLIB_SetAntiAliasing(true);
 }
 
 // The song settings popup over the screen: a row per setting, a column per player, each

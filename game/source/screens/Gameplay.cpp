@@ -62,17 +62,6 @@ u32 withAlpha(u32 rgba, float a) {
     return (rgba & 0xFFFFFF00) | aa;
 }
 
-// Grade colours: stars gold, S cyan, A green, B blue, C purple, D grey, failed red.
-u32 tierColour(int tier) {
-    if (tier == 0) return 0xFF4040FF;
-    if (tier <= 4) return 0xFFE060FF;
-    if (tier <= 7) return 0x80F0FFFF;
-    if (tier <= 10) return 0x60F060FF;
-    if (tier <= 13) return 0x60A0FFFF;
-    if (tier <= 16) return 0xC070FFFF;
-    return 0xB0B0B0FF;
-}
-
 const game::Grade kShown[] = {game::Grade::Marvelous, game::Grade::Perfect, game::Grade::Great,
                               game::Grade::Good, game::Grade::Boo, game::Grade::Miss};
 
@@ -118,9 +107,11 @@ bool Gameplay::loadSong(const Session& session) {
         }
         p.chart = ci;
         p.score_key = game::ChartKey(*entry, entry->charts[sp.chart]);
-        if (const game::HighScoreEntry* best = session.scores.find(p.score_key)) {
-            p.had_best = true;
-            p.prev_best = best->best;
+        if (const game::ChartScores* list = session.scores.find(p.score_key)) {
+            if (const game::HighScore* best = list->best()) {
+                p.had_best = true;
+                p.prev_best = *best;
+            }
         }
         players_.push_back(std::move(p));
     }
@@ -168,14 +159,41 @@ void Gameplay::stop(State next) {
     state_ = next;
 }
 
+// Every human run goes into the chart's list now, under the port's last name, so scores.txt
+// has it even if nobody finishes the name entry on Results (doc 06 §7).
 void Gameplay::finish() {
     stop(State::Done);
+    result_.title = song_.title;
+    result_.players.clear();
     for (Player& p : players_) {
-        if (p.autoplay) continue;
         const game::Score& s = p.judge.score();
-        p.new_best = session_.scores.submit(p.score_key,
-                                            game::HighScore{s.percentX100(), p.failed, s.max_combo});
-        session_.scores_dirty = true;
+        const ddr::Chart& c = song_.charts[p.chart];
+        PlayerResult r;
+        r.port = p.port;
+        r.autoplay = p.autoplay || p.bot;
+        r.bot = p.bot;
+        r.difficulty = c.difficulty;
+        r.meter = c.meter;
+        r.life_bar = p.life_bar;
+        r.speed = p.speed;
+        r.score = s;
+        r.failed = p.failed;
+        r.key = p.score_key;
+        r.had_best = p.had_best;
+        r.prev_best = p.prev_best;
+        if (!r.autoplay) {
+            game::HighScore hs;
+            hs.percent_x100 = s.percentX100();
+            hs.failed = p.failed;
+            hs.max_combo = s.max_combo;
+            hs.life_bar = p.life_bar;
+            hs.speed = p.speed;
+            const std::string& name = session_.config.ports[p.port].name;
+            hs.name = game::ValidName(name) ? name : "AAA";
+            r.entry = session_.scores.submit(p.score_key, hs);
+            session_.scores_dirty = true;
+        }
+        result_.players.push_back(std::move(r));
     }
 }
 
@@ -284,10 +302,13 @@ bool Gameplay::frame() {
                     finish();
             }
         }
+    } else if (state_ == State::Done) {
+        return false;   // main.cpp shows the results
     } else {
-        // Results or error: A/START (or B on an error) on any port goes back to song select.
+        // Error: A/START/B on any port goes back to song select.
         for (int port = 0; port < wii::Input::kPorts; port++)
-            if ((input_.down(port) & (PAD_BUTTON_START | PAD_BUTTON_A)) && !(input_.held(port) & PAD_TRIGGER_Z))
+            if ((input_.down(port) & (PAD_BUTTON_START | PAD_BUTTON_A | PAD_BUTTON_B)) &&
+                !(input_.held(port) & PAD_TRIGGER_Z))
                 return false;
     }
 
@@ -302,11 +323,9 @@ bool Gameplay::frame() {
     if (state_ == State::Playing) {
         drawHud(chart_s_);
         if (paused_) drawPause(now_us);
-    } else if (state_ == State::Done) {
-        drawResults();
-    } else {
+    } else if (state_ == State::Error) {
         font_.print(64, 200, 0xFF5050FF, 1, "%s", error_.c_str());
-        font_.print(64, 220, 0xB0B0B0FF, 1, "A/START back");
+        font_.print(64, 220, 0xB0B0B0FF, 1, "A, B or START back");
     }
     GRRLIB_SetAntiAliasing(true);
 
@@ -563,51 +582,6 @@ void Gameplay::drawPause(u64 now_us) {
         render::rect(112, 440, 4, 28, 0xFFBE00FF);
         printCentred(font_, 320, 446, white, 1, "Press START to continue");
     }
-}
-
-// Results (doc 06 §7): one column per player.
-void Gameplay::drawResults() {
-    const u32 white = 0xFFFFFFFF, grey = 0xB0B0B0FF, warn = 0xFFC040FF;
-    font_.print(64, 48, white, 2, "%s", song_.title.c_str());
-    for (const Player& p : players_) {
-        const game::Score& s = p.judge.score();
-        const float x = p.centre_x - 88;
-        char buf[32];
-        printCentred(font_, p.centre_x, 92, p.autoplay ? warn : grey, 1, playerLabel(p).c_str());
-        const int tier = game::GradeTier(s.percentX100(), p.failed);
-        printCentred(font_, p.centre_x, 106, tierColour(tier), 3,
-                     p.failed ? "FAILED" : game::GradeTierName(tier));
-        std::snprintf(buf, sizeof buf, "%.2f%%", s.percent());
-        printCentred(font_, p.centre_x, 156, p.failed ? 0xFF4040FF : white, 2, buf);
-        char rec[48];
-        u32 rec_colour = grey;
-        if (p.autoplay) {
-            std::snprintf(rec, sizeof rec, "autoplay, not saved");
-        } else if (p.new_best && p.had_best) {
-            std::snprintf(rec, sizeof rec, "New best! (was %.2f%%)", p.prev_best.percent_x100 / 100.0);
-            rec_colour = 0xFFE060FF;
-        } else if (p.new_best) {
-            std::snprintf(rec, sizeof rec, "New best!");
-            rec_colour = 0xFFE060FF;
-        } else {
-            std::snprintf(rec, sizeof rec, "best %.2f%% %s", p.prev_best.percent_x100 / 100.0,
-                          game::GradeTierName(p.prev_best.tier()));
-        }
-        printCentred(font_, p.centre_x, 190, rec_colour, 1, rec);
-        float y = 210;
-        for (game::Grade g : kShown) {
-            font_.print(x, y, gradeColour(g), 1, "%-10s%5d", game::GradeName(g), s.rows[(int)g]);
-            y += 16;
-        }
-        font_.print(x, y, white, 1, "%-10s%5d", "Held", s.holds_held);
-        font_.print(x, y + 16, white, 1, "%-10s%5d", "Let go", s.holds_let_go);
-        font_.print(x, y + 32, white, 1, "%-10s%5d", "Mines hit", s.mines_hit);
-        font_.print(x, y + 48, white, 1, "%-10s%5d", "Max combo", s.max_combo);
-        font_.print(x, y + 66, grey, 1, "mean %+6.1f ms", s.meanOffset() * 1000);
-        font_.print(x, y + 82, grey, 1, "sd   %6.1f ms", s.offsetStdDev() * 1000);
-        if (s.held_misses) font_.print(x, y + 98, warn, 1, "held misses %d", s.held_misses);
-    }
-    font_.print(64, 416, grey, 1, "A/START back");
 }
 
 }  // namespace screens

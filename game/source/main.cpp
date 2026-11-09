@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // ddr-wii entry point. Loads config.ini, scans the song library, then boots into the Players
-// screen (1 or 2 players), then song select, which hands the picked song to gameplay and gets
-// it back after the results. B in song select goes back to Players; B on Players (until the
+// screen (1 or 2 players), then song select, which hands the picked song to gameplay, then the
+// results (name entry), then back to song select. B in song select goes back to Players; B on Players (until the
 // title screen exists) cycles through the M4b audio clock test, the M2b playfield stress test
 // and the M2 render test, and back.
 #include <fat.h>
@@ -19,6 +19,7 @@
 #include "screens/Players.h"
 #include "screens/PlayfieldStress.h"
 #include "screens/RenderTest.h"
+#include "screens/Results.h"
 #include "screens/Session.h"
 #include "screens/SongSelect.h"
 
@@ -51,7 +52,8 @@ void saveConfigIfChanged(screens::Session& session) {
 constexpr const char* kScoresPath = "sd:/ddrwii/scores.txt";
 constexpr const char* kCachePath = "sd:/ddrwii/cache.txt";
 
-// Writes scores.txt after a song that recorded a score.
+// Writes scores.txt after a song that recorded a score (when Gameplay returns, so the runs are
+// kept even if the Wii is switched off on Results) and again after Results if a name changed.
 void saveScoresIfChanged(screens::Session& session) {
     if (!session.scores_dirty) return;
     session.scores_dirty = false;
@@ -129,10 +131,24 @@ int main(int, char**) {
                 continue;
             }
             if (play) {
-                screens::Gameplay game(video, input, art, font, session);
-                runScene(video, input, game, false);
+                bool quit, done;
+                screens::SongResult result;
+                {
+                    screens::Gameplay game(video, input, art, font, session);
+                    runScene(video, input, game, false);
+                    quit = game.quitApp();
+                    done = game.finished();
+                    if (done) result = game.result();
+                }   // the song's audio stream is closed here
                 saveScoresIfChanged(session);
-                if (game.quitApp()) break;
+                if (quit) break;
+                if (done) {
+                    screens::Results res(video, input, font, session, std::move(result));
+                    runScene(video, input, res, false);
+                    saveScoresIfChanged(session);
+                    saveConfigIfChanged(session);   // the last name per port
+                    if (res.quitApp()) break;
+                }
                 continue;   // back to song select
             }
         } else if (which == 1) {

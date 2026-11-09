@@ -36,6 +36,9 @@ struct PortConfig {
   double scrollSpeed = 2.0;
   /** The life bar setting last used on this port. */
   LifeBar lifeBar = LifeBar::Off;
+  /** The name last saved on Results from this port: three letters A-Z, the
+   *  prefill of the next name entry. */
+  std::string name = "AAA";
 };
 
 struct Config {
