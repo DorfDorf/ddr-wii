@@ -86,7 +86,7 @@ void Title::handlePrompt() {
                 wii::sfx::select();
                 choice_ = Choice::Exit;
             } else {
-                hint_.say("Press START to exit ddr-wii");
+                hint_.say("Press START to exit Dance Dance Wiivolution");
             }
         } else {
             continue;
@@ -118,7 +118,10 @@ void Title::draw() {
     std::snprintf(buf, sizeof buf, "%d songs in %d packs", (int)session_.library.SongCount(),
                   (int)session_.library.packs.size());
     font_.print(48, 24, kGrey, 1, "%s", buf);
-    ui::printCentred(font_, 320, 152, kWhite, 3, "DDR-WII");
+    // The name on two lines: at three times the font size one line would run past the
+    // title-safe area (x 64-576).
+    ui::printCentred(font_, 320, 140, kGrey, 2, "DANCE DANCE");
+    ui::printCentred(font_, 320, 172, kWhite, 3, "WIIVOLUTION");
     for (int k = 0; k < 3; k++) ui::printCentred(font_, 320, 232 + k * 56 + 8, k == row ? kBlack : kWhite, 2, kRows[k]);
     if (!prompt_) ui::help(font_, "Up/Down choose   A select", "START+Z 2 s exit");
     GRRLIB_SetAntiAliasing(true);
@@ -130,7 +133,7 @@ void Title::draw() {
         choiceBox(196, 256, 112, 40, prompt_yes_ == 1, frames_);
         choiceBox(332, 256, 112, 40, prompt_yes_ == 0, frames_);
         GRRLIB_SetAntiAliasing(false);
-        ui::printCentred(font_, 320, 180, kWhite, 2, "Exit ddr-wii?");
+        ui::printCentred(font_, 320, 180, kWhite, 2, "Exit the game?");
         ui::printCentred(font_, 320, 220, kGrey, 1, "Back to the Homebrew Channel");
         ui::printCentred(font_, 252, 268, prompt_yes_ == 1 ? kBlack : kWhite, 1, "Yes");
         ui::printCentred(font_, 388, 268, prompt_yes_ == 0 ? kBlack : kWhite, 1, "No");

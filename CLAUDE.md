@@ -1,6 +1,6 @@
-# ddr-wii
+# Dance Dance Wiivolution (ddr-wii)
 
-A four-panel rhythm game (StepMania-style) for Wii homebrew, played on a GameCube dance mat. Small personal project, GPL-3.0-or-later. C++17 on devkitPPC + libogc + GRRLIB, tested in Dolphin and then on a real Wii by the owner.
+A four-panel rhythm game (StepMania-style) for Wii homebrew, played on a GameCube dance mat. Players see the name Dance Dance Wiivolution (title screen, exit prompt, the Homebrew Channel's `meta.xml`); the repository, code, file headers and SD folders keep `ddr-wii` / `sd:/ddrwii`, so existing cards keep working. Small personal project, GPL-3.0-or-later. C++17 on devkitPPC + libogc + GRRLIB, tested in Dolphin and then on a real Wii by the owner.
 
 ## Commands
 
