@@ -9,8 +9,10 @@
 // three-letter name entry prefilled with that name: Up/Down change the letter (held: repeat),
 // Left/Right move, START saves. Every change goes straight into the table, so a name typed but
 // not saved still counts if the game is left with START+Z; saving also keeps it as the port's
-// last name. After 25 s every open name entry saves itself, so one player can't hold up the
-// other. A from any player continues to song select once nobody is still entering a name.
+// last name. Nothing saves by itself. With two players, each one's START saves their own name
+// within 25 s; after that, any player's START saves every name still open (as typed), so one
+// player can't hold up the other for long. With one player there's no timer. A from any
+// player continues to song select once nobody is still entering a name.
 #pragma once
 
 #include <gctypes.h>
@@ -52,7 +54,8 @@ struct SongResult {
 
 class Results {
 public:
-    static constexpr u64 kNameUs = 25000000;   // name entry saves itself after 25 s
+    // With two players: after this, any player's START saves every open name entry.
+    static constexpr u64 kNameUs = 25000000;
 
     Results(wii::Video& video, const wii::Input& input, const render::Font& font, Session& session,
             SongResult result);
@@ -76,6 +79,8 @@ private:
     void save(Column& c);
     void changeLetter(Column& c, int dir);
     bool anyNaming() const;
+    int humans() const;                  // players with a pad (not the Y test P2)
+    int secondsLeft(u64 now_us) const;   // of kNameUs, 0 once it's up
     void draw(u64 now_us);
     void drawColumn(const Column& c, int slot, u64 now_us);
 

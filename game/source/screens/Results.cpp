@@ -78,6 +78,17 @@ Results::Results(wii::Video& video, const wii::Input& input, const render::Font&
     }
 }
 
+int Results::humans() const {
+    int n = 0;
+    for (const Column& c : cols_) n += c.r.bot ? 0 : 1;
+    return n;
+}
+
+int Results::secondsLeft(u64 now_us) const {
+    const u64 el = now_us - start_us_;
+    return el >= kNameUs ? 0 : (int)((kNameUs - el + 999999) / 1000000);
+}
+
 bool Results::anyNaming() const {
     for (const Column& c : cols_)
         if (c.naming) return true;
@@ -113,6 +124,13 @@ bool Results::frame() {
     quit_frames_ = chord ? quit_frames_ + 1 : 0;
 
     const bool naming_before = anyNaming();
+    // Nothing saves by itself. Within the time each player's START saves their own name; once
+    // it's up, any player's START saves every name still open, so nobody is held up for long.
+    const bool time_up = humans() > 1 && now - start_us_ >= kNameUs;
+    bool save_all = false;
+    if (time_up)
+        for (const Column& c : cols_)
+            if (!c.r.bot && startPressed(input_, c.r.port)) save_all = true;
     for (Column& c : cols_) {
         if (!c.naming) continue;
         const int port = c.r.port;
@@ -137,14 +155,16 @@ bool Results::frame() {
             hint_us_ = now;
             wii::sfx::error();
         }
-        if (startPressed(input_, port)) {
+        if (!time_up && startPressed(input_, port)) {
             save(c);
             wii::sfx::select();
         }
     }
-    if (now - start_us_ >= kNameUs)
+    if (save_all && anyNaming()) {
         for (Column& c : cols_)
-            if (c.naming) save(c);   // so one player can't hold up the other
+            if (c.naming) save(c);
+        wii::sfx::select();
+    }
     if (quitApp()) {
         for (Column& c : cols_)
             if (c.naming) save(c);   // leaving the game keeps the name as typed
@@ -187,14 +207,17 @@ void Results::draw(u64 now_us) {
     if (typing.empty()) {
         font_.print(48, 400, kGrey, 1, "A continue");
     } else {
-        const u64 el = now_us - start_us_;
-        const int left = el >= kNameUs ? 0 : (int)((kNameUs - el + 999999) / 1000000);
         font_.print(48, 400, kGrey, 1, "Up/Down letter   Left/Right move   START saves the name");
-        if (waiting.empty())
-            font_.print(48, 416, kGrey, 1, "saves itself in %d s", left);
+        const int left = secondsLeft(now_us);
+        if (humans() < 2) {
+            // One player: no timer, START whenever they're ready.
+        } else if (left == 0)
+            font_.print(48, 416, kGrey, 1, "Time's up: any player's START saves every name");
+        else if (waiting.empty())
+            font_.print(48, 416, kGrey, 1, "in %d s either player's START saves both names", left);
         else
-            font_.print(48, 416, kGrey, 1, "%s waits for %s's name   saves itself in %d s", waiting.c_str(),
-                        typing.c_str(), left);
+            font_.print(48, 416, kGrey, 1, "%s waits for %s's name   in %d s %s's START saves it", waiting.c_str(),
+                        typing.c_str(), left, waiting.c_str());
     }
     if (hint_us_ && now_us - hint_us_ < kHintUs) {
         GRRLIB_SetAntiAliasing(true);
@@ -260,9 +283,8 @@ void Results::drawColumn(const Column& c, int slot, u64 now_us) {
         for (int k = 0; k < 3; k++) font_.print(cx - 40 + k * 24, 362, kWhite, 2, "%c", c.name[k]);
         if (c.saved) {
             printRight(font_, cx + 88, 370, kGrey, "saved");
-        } else if (c.naming) {
-            const u64 el = now_us - start_us_;
-            const int left = el >= kNameUs ? 0 : (int)((kNameUs - el + 999999) / 1000000);
+        } else if (c.naming && humans() > 1) {
+            const int left = secondsLeft(now_us);
             std::snprintf(buf, sizeof buf, "%d s", left);
             printRight(font_, cx + 88, 370, left <= 5 ? kRed : kGrey, buf);
         }
