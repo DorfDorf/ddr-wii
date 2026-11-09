@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "core/chart/SmLoader.h"
+#include "platform/wii/MenuSound.h"
 #include "platform/wii/WiiInput.h"
 #include "platform/wii/WiiVideo.h"
 #include "render/ArrowArt.h"
@@ -235,23 +236,26 @@ void Gameplay::resume(u64 now_us) {
 Gameplay::PauseAction Gameplay::pauseInput(u64 now_us) {
     for (const Player& p : players_) {
         if (!p.bot && startPressed(p.port)) {
+            wii::sfx::select();
             resume(now_us);
             return PauseAction::None;
         }
     }
     const u16 d = input_.down(players_[pause_by_].port);
+    if (d & (PAD_BUTTON_UP | PAD_BUTTON_DOWN)) wii::sfx::move();
     if (d & PAD_BUTTON_UP) pause_cursor_ = (pause_cursor_ + 2) % 3;
     if (d & PAD_BUTTON_DOWN) pause_cursor_ = (pause_cursor_ + 1) % 3;
     if ((d & PAD_BUTTON_B) || ((d & PAD_BUTTON_A) && pause_cursor_ == 0)) {
         hint_us_ = now_us;
+        wii::sfx::error();
     } else if (d & PAD_BUTTON_A) {
+        wii::sfx::select();
         return pause_cursor_ == 1 ? PauseAction::Restart : PauseAction::Quit;
     }
     return PauseAction::None;
 }
 
 bool Gameplay::frame() {
-    const u16 held = input_.held(0);
     const u64 now_us = wii::Input::nowUs();
 
     if (state_ == State::Playing && paused_) {
@@ -265,6 +269,7 @@ bool Gameplay::frame() {
         for (size_t i = 0; i < players_.size() && by < 0; i++)
             if (!players_[i].bot && startPressed(players_[i].port)) by = (int)i;
         if (by >= 0) {
+            wii::sfx::select();   // the only menu sound while a song plays
             pause(by, now_us);
         } else {
             const wii::AudioStream::TickReport t = stream_.tickReport();
@@ -329,7 +334,12 @@ bool Gameplay::frame() {
     }
     GRRLIB_SetAntiAliasing(true);
 
-    quit_frames_ = ((held & PAD_BUTTON_START) && (held & PAD_TRIGGER_Z)) ? quit_frames_ + 1 : 0;
+    bool chord = false;   // START+Z on any pad
+    for (int port = 0; port < wii::Input::kPorts; port++) {
+        const u16 h = input_.held(port);
+        chord = chord || ((h & PAD_BUTTON_START) && (h & PAD_TRIGGER_Z));
+    }
+    quit_frames_ = chord ? quit_frames_ + 1 : 0;
     return quit_frames_ < 120;
 }
 

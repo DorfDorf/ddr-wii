@@ -112,6 +112,10 @@ bool ScanSongLibrary(const std::string& root, SongLibrary& out,
                      DefaultSyncOffset def = DefaultSyncOffset::Null,
                      SongCache* cache = nullptr);
 
+/** Sets the sync offset of every pack whose Pack.ini doesn't set one to
+ *  def's (the Options screen changing DefaultSyncOffset without a rescan). */
+void ApplyDefaultSync(SongLibrary& lib, DefaultSyncOffset def);
+
 /** The entries of one folder, split into subfolders and files, sorted, without
  *  "." and "..". Returns false if the folder can't be opened. */
 bool ListFolder(const std::string& dir, std::vector<std::string>& folders,

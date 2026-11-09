@@ -229,7 +229,7 @@ void PlayfieldStress::drawOverlay() {
                     (unsigned)(r.switches_sum / r.frames), r.pixels_sum / r.frames / 1e6);
     }
     const bool over = s.max_interval_us > video_.refreshPeriodUs() * 3 / 2;
-    font_.print(8, 462, over ? warn : grey, 1, "A auto  L/R players  B M2 scene  START+Z 2s exit  (ms; gpu = HW only)");
+    font_.print(8, 462, over ? warn : grey, 1, "A auto  L/R players  B next test  START+Z 2s exit  (ms; gpu = HW only)");
     GRRLIB_SetAntiAliasing(true);
 }
 

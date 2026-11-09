@@ -36,6 +36,9 @@ struct PackInfo {
   bool hasPackIni = false;
   /** Pass to Song::SetGroupOffset(). */
   double syncOffset = 0.0;
+  /** The Pack.ini set SyncOffset itself (NULL or ITG); else syncOffset is
+   *  the default, and ApplyDefaultSync() can change it. */
+  bool syncFromPackIni = false;
 };
 
 /** A minimal INI reader with StepMania's rules: "[Section]" lines,

@@ -40,6 +40,7 @@
 #include "../source/core/timing/TimingData.h"
 #include "../source/core/input/InputFilter.h"
 #include "../source/core/input/MenuRepeat.h"
+#include "../source/core/audio/MenuTones.h"
 #include "../source/core/audio/WavFile.h"
 #include "../source/core/timing/SongClock.h"
 #include "../source/core/game/Judge.h"
@@ -1449,6 +1450,47 @@ static void TestMenuRepeat() {
   CHECK(!r.update(false, true, 5001000));
 }
 
+static void TestMenuTones() {
+  std::printf("[unit] menu tones\n");
+  const int lens[4] = {2400, 5760, 2400, 8640};   // 50, 120, 50, 180 ms at 48 kHz
+  for (int k = 0; k < audio::kMenuSoundCount; k++) {
+    std::vector<int16_t> t = audio::MakeMenuTone((audio::MenuSound)k);
+    CHECK((int)t.size() == lens[k]);
+    int peak = 0;
+    for (int16_t v : t) peak = std::max(peak, std::abs((int)v));
+    CHECK(peak > 1500 && peak <= 6600);                  // quiet: under -14 dBFS
+    CHECK(std::abs(t.front()) < 50 && std::abs(t.back()) < 50);   // no click at either end
+  }
+  // Select goes up an octave and a fifth after 50 ms: count zero crossings either side.
+  std::vector<int16_t> sel = audio::MakeMenuTone(audio::MenuSound::Select);
+  auto crossings = [&](int a, int b) {
+    int n = 0;
+    for (int i = a + 1; i < b; i++) n += (sel[i - 1] < 0) != (sel[i] < 0);
+    return n;
+  };
+  CHECK(std::abs(crossings(240, 2400) - 2 * 880 * 45 / 1000) <= 2);
+  CHECK(std::abs(crossings(2400, 4560) - 2 * 1320 * 45 / 1000) <= 2);
+}
+
+static void TestApplyDefaultSync() {
+  std::printf("[unit] default pack sync, applied without a rescan\n");
+  SongLibrary lib;
+  std::string itg = "[Group]\nVersion=1\nSyncOffset=ITG\n", none = "[Group]\nVersion=1\n";
+  lib.packs.resize(3);
+  lib.packs[0].info = ParsePackIni("a", &itg, DefaultSyncOffset::Null);    // its own: ITG
+  lib.packs[1].info = ParsePackIni("b", &none, DefaultSyncOffset::Null);   // no SyncOffset
+  lib.packs[2].info = ParsePackIni("c", nullptr, DefaultSyncOffset::Null); // no Pack.ini
+  CHECK(lib.packs[0].info.syncFromPackIni && !lib.packs[1].info.syncFromPackIni);
+  ApplyDefaultSync(lib, DefaultSyncOffset::ITG);
+  CHECK_NEAR(lib.packs[0].info.syncOffset, -0.009, 1e-12);
+  CHECK_NEAR(lib.packs[1].info.syncOffset, -0.009, 1e-12);
+  CHECK_NEAR(lib.packs[2].info.syncOffset, -0.009, 1e-12);
+  ApplyDefaultSync(lib, DefaultSyncOffset::Null);
+  CHECK_NEAR(lib.packs[0].info.syncOffset, -0.009, 1e-12);
+  CHECK_NEAR(lib.packs[1].info.syncOffset, 0.0, 1e-12);
+  CHECK_NEAR(lib.packs[2].info.syncOffset, 0.0, 1e-12);
+}
+
 static void TestScoresAndGrades(const std::string& dir) {
   std::printf("[unit] ITG dance points, grades, high scores\n");
   using game::Grade;
@@ -1644,6 +1686,8 @@ int main(int argc, char** argv) {
   TestCalibration();
   TestScoresAndGrades(dir);
   TestMenuRepeat();
+  TestMenuTones();
+  TestApplyDefaultSync();
   RunFuzz(dir, fuzzIterations);
 
   std::printf("\n%d checks, %d failures%s\n", g_checks, g_failures,

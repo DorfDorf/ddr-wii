@@ -167,8 +167,10 @@ PackInfo ParsePackIni(const std::string& groupName, const std::string* packIniTe
   if (!sValue.empty()) {
     if (sValue == "NULL") {
       g.syncOffset = 0.0;
+      g.syncFromPackIni = true;
     } else if (sValue == "ITG") {
       g.syncOffset = ITG_SYNC_OFFSET;
+      g.syncFromPackIni = true;
     }
     // Anything else: invalid, keep the default.
   }

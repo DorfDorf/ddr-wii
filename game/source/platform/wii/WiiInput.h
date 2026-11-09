@@ -37,6 +37,10 @@ public:
 
     bool init(u32 debounce_us = input::InputFilter::kDefaultWindowUs);
     void shutdown();
+    // The Options screen's "Ignore double presses within N ms": applies from the next update().
+    void setDebounceUs(u32 us) {
+        for (auto& f : filters_) f.setWindow(us);
+    }
 
     // Call once per frame, before anything reads input.
     void update();

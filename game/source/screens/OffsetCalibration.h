@@ -5,10 +5,11 @@
 // each beat as a guide, but the player should follow the sound, since the flashes carry the
 // TV's video delay as well.
 //
-// START saves the suggested offset (or the current one, if there aren't enough steps yet)
-// to config.ini and goes back. L/R nudge the current offset by 5 ms, Z clears the steps,
-// Y steps exactly on the beat by itself (to check the screen in Dolphin), B goes back
-// without saving.
+// Opens from Options and with R in song select, and goes back there. A or START saves the
+// suggested offset (or the current one, if there aren't enough steps yet) to config.ini.
+// L/R nudge the current offset by 5 ms, Z clears the steps, Y steps exactly on the beat by
+// itself (to check the screen in Dolphin), B (any pad) goes back without saving. No menu
+// sounds here: they would land on the clicks.
 #pragma once
 
 #include <gctypes.h>
@@ -31,7 +32,7 @@ public:
     OffsetCalibration(wii::Video& video, const wii::Input& input, const render::ArrowArt& art,
                       const render::Font& font, Session& session);
 
-    // One frame of logic + drawing. Returns false to go back to song select.
+    // One frame of logic + drawing. Returns false to go back.
     bool frame();
 
 private:

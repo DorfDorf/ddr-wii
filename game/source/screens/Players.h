@@ -3,18 +3,18 @@
 // Replaces the play-mode screen; laid out like the menu prototype, which follows Simply Love's
 // ScreenSelectStyle, redrawn with our own placeholder graphics.
 //
-// The lead port (the first port to press an arrow, A or Y here, until the title screen exists
-// and does it) moves between 1 Player and 2 Players with Left/Right and confirms with A.
+// The lead port (whoever pressed Play on the title) moves between 1 Player and 2 Players with Left/Right and confirms with A.
 // 2 Players is greyed out when no second pad is connected. P2 joins by pressing A on their
 // own pad, before or after the lead's A; Y (controller) adds an autoplay P2 for testing.
 // Once set, the lower port is P1 and plays on the left. Nobody joins anywhere else.
-// B goes back (to the test scenes, until the title exists); START+Z for 2 s exits.
+// B goes back to the title; START+Z for 2 s exits.
 #pragma once
 
 #include <gctypes.h>
 
 #include <string>
 
+#include "screens/MenuUi.h"
 #include "screens/Session.h"
 
 namespace wii { class Video; class Input; }
@@ -24,7 +24,9 @@ namespace screens {
 
 class Players {
 public:
-    Players(wii::Video& video, const wii::Input& input, const render::Font& font, Session& session);
+    // from_title: start on 1 Player (back from song select, start on the last choice).
+    Players(wii::Video& video, const wii::Input& input, const render::Font& font, Session& session,
+            bool from_title);
 
     // Returns false when the players are set (chosen()), B went back (back()) or the exit
     // chord was held.
@@ -53,7 +55,7 @@ private:
     std::string message_;
     u64 message_us_ = 0;
     u32 frames_ = 0;
-    u32 quit_frames_ = 0;
+    ui::ExitChord exit_;
     bool chosen_ = false;
     bool back_ = false;
 };

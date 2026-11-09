@@ -128,6 +128,12 @@ size_t SongLibrary::SongCount() const {
   return n;
 }
 
+void ApplyDefaultSync(SongLibrary& lib, DefaultSyncOffset def) {
+  for (PackEntry& p : lib.packs)
+    if (!p.info.syncFromPackIni)
+      p.info.syncOffset = def == DefaultSyncOffset::Null ? 0.0 : ITG_SYNC_OFFSET;
+}
+
 bool ListFolder(const std::string& dir, std::vector<std::string>& folders,
                 std::vector<std::string>& files) {
   folders.clear();
